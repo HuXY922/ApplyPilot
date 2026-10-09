@@ -5,9 +5,9 @@ This is a plan/configuration, not a claim that a public service has been created
 ## Current delivery status (checked 2026-10-09)
 
 - Railway `create_project` returned: "Your trial has expired. Please select a plan to continue using Railway." No new ApplyPilot project was created. A paid plan upgrade has not been authorized; do not retry by selecting a paid plan or using the old Career Desk project/volume.
-- The public GitHub plugin is installed and enabled, but this execution session exposes no GitHub tools. Remote repository publication remains pending; installation alone does not establish a published repository.
+- Public source publication is verified at [HuXY922/ApplyPilot](https://github.com/HuXY922/ApplyPilot). The initial remote commit is [`df51cc9499de1a6bf4092c0e65f280c857625087`](https://github.com/HuXY922/ApplyPilot/commit/df51cc9499de1a6bf4092c0e65f280c857625087). An unauthenticated Git clone succeeded on 2026-10-09; all 99 file paths and SHA-256 hashes matched reviewed local snapshot `9685da3b4af72452d0bb53269cc7165c3f91fbaf`, with no missing, extra or changed files. This verifies repository publication, not a hosted Web Demo.
 - DeepSeek is the selected deployment provider. Its adapter and configuration are present, but no live authenticated model request has been verified. No public ApplyPilot URL, deployed outbound connectivity or persistent-volume redeploy test has been verified.
-- Resume provisioning only after the account blocker is resolved within an approved spending scope. Publication and deployed acceptance checks below remain separate completion gates.
+- Resume provisioning only after the account blocker is resolved within an approved spending scope. Repository publication is complete; hosted deployment and its acceptance checks remain separate open completion gates.
 
 ## Preconditions
 - Use a new ApplyPilot project/service. Never attach, copy or reset old Career Desk production volumes.

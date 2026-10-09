@@ -4,7 +4,7 @@
 
 ApplyPilot 把经过用户确认的求职档案、真实岗位核验、资格检查、证据匹配、简历建议和投递记录连成一个可运行的 Web 产品。它保留 Career Desk 的 Python API 与 SQLite 状态机，独立运行，不依赖开发助手的对话或私人上下文。
 
-> 当前交付状态：源码与本地 API 闭环已实现；公开托管、GitHub 远端发布、真实模型调用和完整浏览器 E2E 仍需分别验证。不要把规则模式或单元测试当作真实 AI/网申验收。
+> 当前交付状态：源码与本地 API 闭环已实现；[公开 GitHub 仓库](https://github.com/HuXY922/ApplyPilot)已于 2026-10-09 验证，首次发布的 99 个文件与已审核源码逐文件哈希一致。公开 Web 托管、真实模型调用和完整浏览器 E2E 仍需分别验证。不要把规则模式或单元测试当作真实 AI/网申验收。
 
 ## 为什么做
 
@@ -102,7 +102,9 @@ python scripts/demo_fill.py
 
 使用 `Dockerfile.applypilot` 和 `railway.applypilot.toml`，不要误选保留的旧 Career Desk 配置。SQLite 采用单实例和独立 `/data` 持久化卷，不复用旧生产卷。Railway 只是可选托管方案，本项目不依赖其私有功能。
 
-2026-10-09 部署检查：Railway 创建独立项目时返回试用已到期、需选择套餐的错误；未创建新项目，也未获准升级付费套餐。GitHub 插件已安装并启用，但当前执行会话没有 GitHub 工具，公开仓库发布仍待完成。公开 URL、已部署实例出网及真实认证模型调用均未验收，详见 [部署状态与阻塞](docs/DEPLOYMENT.md#current-delivery-status-checked-2026-10-09)。
+2026-10-09 发布检查：[HuXY922/ApplyPilot](https://github.com/HuXY922/ApplyPilot) 已公开，首次远端提交为 [`df51cc9499de1a6bf4092c0e65f280c857625087`](https://github.com/HuXY922/ApplyPilot/commit/df51cc9499de1a6bf4092c0e65f280c857625087)。未登录的 Git 克隆成功，99 个文件的路径和 SHA-256 均与已审核本地提交 `9685da3b4af72452d0bb53269cc7165c3f91fbaf` 一致，无缺失、额外文件或内容差异。该记录验证源码发布，不代表 Web Demo 已部署。
+
+Railway 创建独立项目时返回试用已到期、需选择套餐的错误；未创建新项目，也未获准升级付费套餐。公开 Web Demo URL、已部署实例出网及真实认证模型调用均未验收，详见 [部署状态与阻塞](docs/DEPLOYMENT.md#current-delivery-status-checked-2026-10-09)。
 
 - [部署说明](docs/DEPLOYMENT.md)
 - [API 与数据模型](docs/API_AND_DATA.md)

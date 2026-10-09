@@ -2,6 +2,8 @@
 
 ## Current code verification
 
+The two Python suites total **284 passing tests**. The **60 DOM/API checks** below remain mocked, socket-free UI verification rather than real browser E2E acceptance.
+
 - `python -m unittest discover -s tests -v`: **139 passed**, zero skips; includes 119 preserved baseline tests + 20 audited-hardening regressions. Latest root run: 1.677 seconds.
 - `python -m unittest discover -s tests_applypilot -v`: **145 passed**, zero skips; includes provider-specific consent, DeepSeek mocked transport/schema/grounding and exact-call provenance regressions. Latest root run: 0.991 seconds.
 - `node scripts/test-ui-dom.cjs`: **60 interactive DOM/API checks passed** in a socket-free Node DOM simulation backed by real WSGI/SQLite. Discovery and configured-model responses are mocked. This is not a rendering/browser E2E test.
@@ -37,15 +39,22 @@ Four audit defects were reproduced and fixed: missing Radar image dependencies, 
 
 - ByteDance: bounded official website detail/related-reference adapter. Schema/access changes can produce partial or failed runs.
 - Ashby: public feed independently returned HTTP200 in initial research. Final adapter live acceptance is incomplete (timeout/oversized records). Further network validation was stopped after approval cancellation; default source remains ByteDance.
-- No actual job application, login, challenge bypass, production database read/copy, or deployment occurred.
+- No actual job application, recruitment-site login, challenge bypass, production database read/copy, or deployment occurred.
+
+## Public repository verification
+
+On 2026-10-09, [HuXY922/ApplyPilot](https://github.com/HuXY922/ApplyPilot) was published as a public repository. The initial remote commit is [`df51cc9499de1a6bf4092c0e65f280c857625087`](https://github.com/HuXY922/ApplyPilot/commit/df51cc9499de1a6bf4092c0e65f280c857625087).
+
+An unauthenticated Git clone succeeded. All **99 file paths and SHA-256 hashes** exactly matched the privacy-reviewed local source snapshot `9685da3b4af72452d0bb53269cc7165c3f91fbaf`: zero missing files, zero extra files and zero content mismatches. Nested directories and `.env.example` were preserved. The candidate profile is explicitly fictional demonstration data. No project license was added.
+
+Publication used the authenticated GitHub website. It did not create a personal access token or authorize the separate CLI. This source-publication check does not establish a running public Web Demo, browser E2E success, or a live model call.
 
 ## Release checks still open
 
 1. Real browser desktop/mobile layout and end-to-end flows, including imports, cancellation, back/forward and reload.
 2. Live selected-model request with safely configured key and billing limits.
 3. Authorized public hosting, real container build, health and restart/redeploy persistence from outside the development environment.
-4. Public GitHub remote publication and exact commit verification.
-5. Human assessment of job facts and résumé suggestions; wider provider/employer coverage.
+4. Human assessment of job facts and résumé suggestions; wider provider/employer coverage.
 
 The source bundle is an implementation checkpoint with explicit limits, not certification that every requested deliverable is complete.
 
@@ -59,4 +68,4 @@ Additional deployment safeguards require Railway's /data mount before creating a
 
 ## Deployment account checkpoint
 
-On 2026-10-09 an authorized minimal Railway project-creation attempt returned: “Your trial has expired. Please select a plan to continue using Railway.” Re-listing projects confirmed no ApplyPilot project was created. No paid upgrade or resource change occurred. GitHub is installed/enabled, but this conversation exposes no GitHub operations; authenticated repository access and publication remain unverified.
+On 2026-10-09 an authorized minimal Railway project-creation attempt returned: “Your trial has expired. Please select a plan to continue using Railway.” Re-listing projects confirmed no ApplyPilot project was created. No paid upgrade or resource change occurred. At that earlier checkpoint, the GitHub plugin was installed/enabled but exposed no GitHub operations, so authenticated access and publication were still unverified. The later browser publication and independent public-clone verification are recorded above; the Railway, live-model and real-browser acceptance limits remain unchanged.
