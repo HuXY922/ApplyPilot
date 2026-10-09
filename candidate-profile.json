@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "demo-candidate",
+  "status": "fictional_demo_only",
+  "updated_on": "2026-10-09",
+  "sources": [{"id":"demo-source","type":"synthetic","filename":"fictional-resume.txt","library_file_id":"fictional-library-id","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","page":1,"read_on":"2026-10-09"}],
+  "identity": {"name_zh":"林小禾（虚构示例）","name_en":null,"email":"fictional-candidate@example.invalid","phone_national":null,"current_city":"上海"},
+  "education": [{"id":"edu-demo","institution":"示例大学（虚构）","major":"信息管理","degree_level":"硕士","start_month":"2024-09","end_month":"2027-07","end_status":"expected"}],
+  "experience": [{"id":"exp-demo","organization":"示例实验室（虚构）","role":"产品研究实习生","employment_type":"internship","start_month":"2025-06","end_month":"2025-09","is_current":false,"workstreams":[{"name":"原型与用户研究","description":"设计 Agent 交互原型，整理用户反馈，使用 SQL 和 Python 分析产品迭代数据。虚构教学案例，无真实履历。"}]}],
+  "projects": [{"id":"proj-demo","name":"校园学习助手（虚构）","description":"设计大模型 Agent 交互原型和评测清单，开展用户调研。虚构教学案例。"}],
+  "skills":{"data_tools":["SQL","Python","原型设计","用户研究"]},
+  "certifications":[],
+  "job_preferences":{"resume_target":{"value":"AI 产品经理"},"additional_roles":{"value":["产品经理","产品运营"]},"include_cities":{"value":["上海","深圳","广州"]},"excluded_roles":null,"exclusive_city_filter":false},
+  "resume_assets":[{"id":"demo-resume","source_id":"demo-source","filename":"fictional-resume.txt","library_file_id":"fictional-library-id","format":"txt","language":"zh","is_default":true}],
+  "application_answers":[],
+  "reuse_policy":{"never_infer_missing_personal_facts":true,"never_store_passwords_otp_or_api_keys":true,"external_transmission_blocked":true}
+}

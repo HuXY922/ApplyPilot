@@ -1,0 +1,11 @@
+{
+  "command": "PYTHONDONTWRITEBYTECODE=1 /tmp/applypilot-audit-venv/bin/python -m unittest discover -s tests -v",
+  "exit_code": 0,
+  "wall_seconds": 1.925,
+  "python": "3.12.14",
+  "sqlite": "3.53.1",
+  "dependencies": {
+    "gunicorn": "25.1.0",
+    "packaging": "26.3"
+  }
+}

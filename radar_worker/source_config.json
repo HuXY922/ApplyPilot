@@ -1,0 +1,12 @@
+{
+  "description": "Public official detail pages used ONLY as crawl entrypoints. Every run re-fetches seeds and dynamically discovers official recommended-job links; all discovered jobs are verified independently. No static jobs are imported.",
+  "confirmed_on": "2026-09-07",
+  "seed_urls": [
+    "https://jobs.bytedance.com/campus/m/position/detail/7667889560824154373",
+    "https://jobs.bytedance.com/campus/m/position/detail/7667892775577733429",
+    "https://jobs.bytedance.com/campus/m/position/detail/7667837272777541893",
+    "https://jobs.bytedance.com/campus/m/position/detail/7667380186237716741"
+  ],
+  "max_discovery_requests": 8,
+  "max_verified_references": 40
+}

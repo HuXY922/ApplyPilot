@@ -1,0 +1,15 @@
+{
+  "kind": "real_loopback_http_and_sqlite",
+  "live_source_requested": false,
+  "checks": [
+    "isolated_fictional_seed",
+    "review_and_confirm_profile",
+    "analysis_and_versioned_resume_via_http",
+    "idempotent_tracker_event",
+    "second_session_isolation",
+    "app_recreation_persistence"
+  ],
+  "analysis_mode": "rules",
+  "resume_mode": "rules",
+  "passed": true
+}

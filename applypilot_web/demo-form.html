@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>受控填表演示 · ApplyPilot</title>
+  <link rel="stylesheet" href="/demo-form.css">
+  <script src="/demo-form.js" defer></script>
+</head>
+<body>
+  <main class="demo-shell">
+    <a href="/">← 返回 ApplyPilot</a>
+    <header>
+      <p class="eyebrow">APPLYPILOT / CONTROLLED SIMULATION</p>
+      <h1>把信息填好，把确认留给你。</h1>
+      <p id="simulation-notice"><strong>受控模拟，非真实投递。</strong>本页只接受内置虚构候选人，回执只存于当前体验会话。不会访问招聘网站、登录、解验证码或投递真实申请。</p>
+    </header>
+    <section class="card" aria-labelledby="form-title">
+      <h2 id="form-title">1. 填写与回读</h2>
+      <p>可用按钮填入虚构样例，或用项目里的 Playwright 脚本逐项填写并核对。请勿输入真实个人信息。</p>
+      <button id="fill-fictional" type="button" disabled>填入虚构样例</button>
+      <form id="demo-form" autocomplete="off">
+        <fieldset id="fields" disabled>
+          <label for="name">姓名（虚构）<input id="name" name="name" required maxlength="100" type="text"></label>
+          <label for="email">邮箱（不可投递的示例地址）<input id="email" name="email" required maxlength="100" type="email"></label>
+          <label for="role">岗位（虚构）<select id="role" name="role" required><option value="">选择模拟岗位</option><option>AI 产品经理（虚构岗位）</option><option>产品研究实习生（虚构岗位）</option></select></label>
+          <label for="education">教育经历（虚构）<input id="education" name="education" required maxlength="200" type="text"></label>
+          <label for="experience">实践经历（虚构）<textarea id="experience" name="experience" required maxlength="500" rows="3"></textarea></label>
+        </fieldset>
+        <button id="prepare" type="submit" disabled>核对内容，进入人工确认</button>
+      </form>
+    </section>
+    <section id="review" class="card" hidden aria-labelledby="review-title">
+      <h2 id="review-title">2. 人工最终确认</h2>
+      <p>确认只适用于下列内容和本站模拟接收端。取消或修改任何字段都会使本次确认失效。</p>
+      <dl id="review-fields"></dl>
+      <p>接收端：<span id="review-destination"></span></p>
+      <p>内容指纹：<span id="review-hash"></span></p>
+      <label><input id="confirm-simulation" type="checkbox">我已核对上述虚构信息，确认只在本体验会话记录模拟回执。</label>
+      <div><button id="submit-simulation" type="button" disabled>确认记录模拟回执</button><button id="cancel" type="button">取消本次确认</button></div>
+    </section>
+    <p id="status" role="status" aria-live="polite">正在建立隔离体验会话…</p>
+    <section id="result" class="card" hidden aria-labelledby="result-title">
+      <h2 id="result-title">3. 受控模拟回执</h2>
+      <pre id="receipt"></pre>
+    </section>
+    <button id="reconcile" type="button" hidden>只读核查本会话回执</button>
+    <p>安全边界：默认脚本只填写和回读。提交响应不明时停止，不自动重试；可只读核查已保存回执。本演示不会改变真实岗位的投递状态。</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "version": "9.1b-1",
+  "cohort": 2027,
+  "preferred_cities": ["上海", "北京", "杭州", "深圳", "广州"],
+  "official_job_hosts": ["jobs.bytedance.com"],
+  "max_jobs_per_run": 40,
+  "evidence_max_age_seconds": 3600,
+  "session_hours": 24,
+  "test_fixture_enabled": true
+}

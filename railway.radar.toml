@@ -1,0 +1,10 @@
+# Select this config file for a SECOND SERVICE in the EXISTING Career Desk project.
+# Never select it for the existing Web service. No volume or public domain required.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.radar"
+[deploy]
+startCommand = "python -m radar_worker.run --report /tmp/radar-run.json"
+restartPolicyType = "NEVER"
+# Enable only AFTER dry-run quality approval and a successful supervised live test:
+# cronSchedule = "0 0 * * *"

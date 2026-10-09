@@ -1,0 +1,10 @@
+{
+  "candidate_id":"demo-candidate",
+  "campaign_id":"autumn-2026-demo-candidate",
+  "mode":"simulation",
+  "radar_date":"2026-10-09",
+  "jobs":[
+    {"company_id":"demo-company","company_name":"示例科技（虚构）","title":"AI 产品经理（虚构测试）","city":"上海","canonical_url":"https://example.invalid/jobs/demo-product","description":"虚构测试，禁止投递。正式校招。2027届本科及以上学历。专业不限。负责 Agent 交互原型、用户反馈、模型评测与数据分析。","priority":"P1","match_score":70,"match_reasons":["虚构测试"],"risk_flags":["虚构测试，禁止投递"],"recommendation":"仅用于本地测试。"},
+    {"company_id":"demo-company","company_name":"示例科技（虚构）","title":"产品运营（虚构测试）","city":"深圳","canonical_url":"https://example.invalid/jobs/demo-operations","description":"虚构测试，禁止投递。正式校招。2027届本科及以上学历。专业不限。负责产品迭代、用户调研和增长策略。","priority":"P1","match_score":65,"match_reasons":["虚构测试"],"risk_flags":["虚构测试，禁止投递"],"recommendation":"仅用于本地测试。"}
+  ]
+}

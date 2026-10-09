@@ -1,0 +1,14 @@
+{
+  "adapter_id": "local-fixture-v1",
+  "allowed_origins": ["http://127.0.0.1:8877"],
+  "submit_enabled": false,
+  "fields": [
+    {"label":"测试姓名","field_key":"identity.name_zh","kind":"text","allow_profile_fallback":true},
+    {"label":"测试邮箱","field_key":"identity.email","kind":"text","allow_profile_fallback":true},
+    {"label":"期望城市","field_key":"preferred_city","kind":"select","allow_profile_fallback":false}
+  ],
+  "blockers": [
+    {"text":"请先登录","kind":"login","prompt":"请在同一个执行浏览器中完成登录。"},
+    {"text":"请完成人工验证","kind":"captcha","prompt":"页面需要人工验证，自动填写已暂停。"}
+  ]
+}

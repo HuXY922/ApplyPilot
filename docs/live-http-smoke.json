@@ -1,0 +1,25 @@
+{
+  "kind": "real_loopback_http_and_sqlite",
+  "live_source_requested": true,
+  "checks": [
+    "isolated_fictional_seed",
+    "review_and_confirm_profile",
+    "analysis_and_versioned_resume_via_http",
+    "idempotent_tracker_event",
+    "second_session_isolation",
+    "app_recreation_persistence",
+    "live_official_search_through_http_and_persistence"
+  ],
+  "analysis_mode": "rules",
+  "resume_mode": "rules",
+  "live_jobs": [
+    {
+      "id": "job-d863e5a341326e79fff5bc8e",
+      "title": "评测产品经理 - AI Platform",
+      "url": "https://jobs.bytedance.com/campus/position/detail/7667889560824154373",
+      "verified_at": "2026-10-09T05:55:06Z"
+    }
+  ],
+  "live_run_status": "partial",
+  "passed": true
+}
