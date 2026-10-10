@@ -34,8 +34,9 @@ const PATHS = {
 };
 let state = null, route = validRoute(location.hash.slice(1)), selectedId = null, mobileOpen = false;
 let profileDraft = null, editVersion = null, profileDirty = false, importedDraft = null, importText = '', importFile = null;
+let importFileInput = null, importReading = false, importReadId = 0, restoreImportDraft = true;
 let searchDraft = {query:'', recruitment_type:'campus', cities:''};
-let eventsCache = new Map(), eventsErrors = new Map(), lastSearchRun = null;
+let eventsCache = new Map(), eventsErrors = new Map(), lastSearchRun = null, searchErrorToast = null;
 const trackDrafts = new Map();
 const busy = new Set();
 
@@ -72,9 +73,9 @@ const jobPath = (j,suffix) => `/api/jobs/${encodeURIComponent(j.id)}/${suffix}`;
 const statusName = status => STATUS[status] || status || '未记录';
 const formatDate = value => { if (!value) return '时间未提供'; const d = new Date(value); return Number.isNaN(d.getTime()) ? text(value) : d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}); };
 function safeURL(value) { try { const u = new URL(value); return ['https:','http:'].includes(u.protocol) ? u.href : null; } catch { return null; } }
-function btn(label, handler, {style='', ico=null, disabled=false, key=null, type='button'}={}) {
+function btn(label, handler, {style='', ico=null, disabled=false, key=null, id=null, type='button'}={}) {
   const pending = key && busy.has(key);
-  return el('button',{class:`btn ${style}`,type,disabled:disabled || pending,onClick:handler},pending?el('span',{class:'spinner','aria-hidden':'true'}):ico?icon(ico,14):null,pending?'处理中…':label);
+  return el('button',{class:`btn ${style}`,id,type,disabled:disabled || pending,onClick:handler},pending?el('span',{class:'spinner','aria-hidden':'true'}):ico?icon(ico,14):null,pending?'处理中…':label);
 }
 function tag(label, tone='') {return el('span',{class:`tag ${tone}`},label);}
 function notice(content, tone='') {return el('div',{class:`notice ${tone}`,role:tone==='error'?'alert':'note'},content);}
@@ -86,7 +87,9 @@ function toast(message, error=false) {
   box.append(el('button',{'aria-label':'关闭通知',onClick:()=>box.remove()},'×'));
   document.querySelector('#notifications').append(box);
   if (!error) setTimeout(()=>box.remove(),6000);
+  return box;
 }
+function clearSearchErrorToast() { searchErrorToast?.remove(); searchErrorToast=null; }
 async function api(path, body) {
   const controller = new AbortController();
   const timer = setTimeout(()=>controller.abort(),65000);
@@ -106,7 +109,7 @@ async function api(path, body) {
 async function refresh({resetProfile=false}={}) {
   state=await api('/api/state');
   if (!profileDraft || resetProfile) {profileDraft=normalizeProfile(state.profile); editVersion=state.profile_version; profileDirty=false;}
-  if (!importedDraft && state.draft) importedDraft=state.draft.profile || state.draft;
+  if (!importedDraft && state.draft && restoreImportDraft) importedDraft=state.draft.profile || state.draft;
   if (!selected() && jobs().length) selectedId=jobs()[0].id;
   if (!jobs().length) selectedId=null;
 }
@@ -114,7 +117,7 @@ async function action(key, work, success) {
   if (busy.has(key)) return;
   busy.add(key); render();
   try {await work(); if (success) toast(success);}
-  catch(error) {if(error.payload?.run)lastSearchRun=error.payload.run; try{await refresh();}catch{} toast(error.code==='version_conflict'||error.code==='stale_profile'?`${error.message}。编辑内容已保留，请查看最新档案版本后再保存。`:error.message,true);}
+  catch(error) {if(error.payload?.run)lastSearchRun=error.payload.run; try{await refresh();}catch{} const box=toast(error.code==='version_conflict'||error.code==='stale_profile'?`${error.message}。编辑内容已保留，请查看最新档案版本后再保存。`:error.message,true);if(key==='search')searchErrorToast=box;}
   finally {busy.delete(key); render();}
 }
 function go(next) {
@@ -169,7 +172,7 @@ function render() {
   const nav=el('nav',{class:'navigation','aria-label':'主要导航'},ROUTES.map(([id,label,ico,num])=>el('button',{class:`nav-item ${route===id?'active':''}`,type:'button','aria-current':route===id?'page':null,onClick:()=>go(id)},icon(ico,17),label,el('span',{class:'nav-number'},num))));
   const sidebar=el('aside',{class:`sidebar ${mobileOpen?'open':''}`,inert:window.matchMedia?.('(max-width: 700px)').matches&&!mobileOpen?'':null},el('div',{class:'brand'},el('div',{class:'brand-mark','aria-hidden':'true'},'A'),'ApplyPilot'),el('div',{class:'brand-tag'},'YOUR NEXT CHAPTER'),el('div',{class:'nav-label'},'求职工作台'),nav,el('div',{class:'sidebar-bottom'},el('div',{class:'privacy-note'},el('strong',{},icon('shield',14),'每一步，由你掌舵'),el('p',{},'信息可追溯，建议有依据。外部投递始终由你确认并完成。')),el('div',{class:'session-status'},el('i',{class:'status-dot'}),'独立演示会话'),el('p',{class:'session-version'},'APPLYPILOT / CAMPUS EDITION'),state.session_expires_at?el('p',{class:'session-expiry'},`会话到期：${formatDate(state.session_expires_at*1000)}`):null));
   const topbar=el('header',{class:'topbar'},el('div',{class:'breadcrumbs'},el('button',{class:'mobile-menu',type:'button','aria-label':mobileOpen?'关闭菜单':'打开菜单','aria-expanded':mobileOpen,onClick:()=>{mobileOpen=!mobileOpen;render();}},icon('menu',20)),el('span',{},'工作空间'),el('span',{class:'crumb-separator'},'/'),el('strong',{},ROUTES.find(r=>r[0]===route)[1])),el('div',{class:'topbar-right'},el('span',{class:'header-label'},'CHINA CAMPUS'),el('span',{class:'mode-pill'},el('i',{class:'status-dot'}),modeLabel()),el('button',{class:'topbar-refresh',type:'button','aria-label':'刷新会话状态',disabled:busy.has('refresh'),onClick:()=>action('refresh',()=>refresh(),'状态已刷新。')},icon('refresh',15)),el('div',{class:'avatar',title:'虚构演示档案'},(state.profile?.name||'演示').slice(0,1))));
-  const content=el('main',{id:'main',class:'content',tabindex:'-1'},el('div',{class:'demo-notice'},el('span',{},icon('info',13),'公开演示环境，请仅使用虚构资料。会话默认保留 24 小时；系统不会向外部网站自动投递。'),el('b',{class:'demo-badge'},'PUBLIC DEMO')));
+  const content=el('main',{id:'main',class:'content',tabindex:'-1'},el('div',{class:'demo-notice',role:'note'},el('span',{},icon('info',13),'虚构演示；匿名会话约24小时后过期，过期数据会清理，不用于真实长期求职记录。请仅使用虚构资料；系统不会向外部网站自动投递。'),el('b',{class:'demo-badge'},'PUBLIC DEMO')));
   const pages={overview:renderOverview,profile:renderProfile,radar:renderRadar,analysis:renderAnalysis,resume:renderResume,tracker:renderTracker};
   content.append(pages[route](),el('footer',{class:'footnote'},el('span',{},'ApplyPilot · 为下一程，做更充分的准备'),el('span',{},'可追溯的信息 / 有依据的建议 / 由你确认的行动')));
   ROOT.replaceChildren(el('div',{class:'app-shell'},sidebar,el('button',{class:`mobile-overlay ${mobileOpen?'open':''}`,type:'button','aria-label':'关闭导航',tabindex:'-1',onClick:()=>{mobileOpen=false;render();}}),el('div',{class:'main-shell'},topbar,content)));
@@ -198,7 +201,7 @@ function renderOverview(){
   return el('div',{},header('让下一程，更有方向。','YOUR CAREER, IN FOCUS','从这里，开始一次更从容的求职。',el('span',{class:'page-date'},new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'}))),hero,el('section',{class:'stats','aria-label':'当前会话统计'},stats.map(([label,value,note,ico])=>el('div',{class:'stat'},el('div',{class:'stat-top'},label,el('span',{class:'stat-icon'},icon(ico,15))),el('div',{class:'stat-value'},value),el('p',{class:'stat-note'},note)))),sectionTitle('你的求职路径',null,'每一个阶段，都留下清楚的依据。'),el('section',{class:'workflow'},workflow.map(([id,label,desc,done],index)=>el('button',{class:`workflow-step ${done?'ready':index===current?'current':''}`,type:'button',onClick:()=>go(id)},el('span',{class:'step-number'},done?icon('check',12):`0${index+1}`),el('div',{},el('h3',{},label),el('p',{},desc))))),el('div',{class:'overview-grid'},el('section',{class:'card card-pad'},sectionTitle('工作台里的机会',btn('全部岗位',()=>go('radar'),{style:'ghost',ico:'arrow'})),jobs().length?jobs().slice(0,3).map(compactJob):empty('下一份机会，从搜索开始','搜索官方招聘来源，查看能够核验的岗位与线索。',btn('前往岗位雷达',()=>go('radar'),{style:'small'}))),el('section',{class:'card card-pad'},sectionTitle('最近的工作记录',tag('本次会话')),activity)));
 }
 function runTitle(run){const kind=run.kind||run.type||run.action;const name={search:'岗位搜索',analyze:'匹配分析',analysis:'匹配分析',resume:'简历建议',profile_import:'简历导入'}[kind]||'工作台执行记录';return `${name} · ${{success:'完成',succeeded:'完成',completed:'完成',failed:'失败',partial:'部分来源失败',running:'执行中'}[run.status]||run.status||'已记录'}`;}
-function runSummary(run){if(run.error)return text(run.error);const result=run.result||{};if(result.message)return text(result.message);const count=run.job_count??run.result_count??result.job_count??result.found;const failures=array(run.failures||result.failures);return [(run.query||run.request?.query)?`搜索：${run.query||run.request?.query}`:'',count!==undefined?`${count} 条记录`:'',failures.length?`${failures.length} 个来源未成功`:''].filter(Boolean).join(' · ')||'查看岗位来源与结果，不以执行记录代表真实投递。';}
+function runSummary(run){if(run.error)return text(run.error);const result=run.result||{};if(result.message)return text(result.message);const count=run.job_count??run.result_count??result.job_count??result.found;const failures=array(run.failures||result.failures);return [(run.query||run.request?.query)?`搜索：${run.query||run.request?.query}`:'',count!==undefined?`${count} 条记录`:'',failures.length?`${failures.length} 条来源错误`:''].filter(Boolean).join(' · ')||'查看岗位来源与结果，不以执行记录代表真实投递。';}
 function inputField(label,value,onChange,{type='text',placeholder='',hint='',wide=false,rows=3,maxLength=4000}={}){
   const control=el(type==='textarea'?'textarea':'input',{type:type==='textarea'?null:type,value:value??'',placeholder,maxlength:maxLength,rows:type==='textarea'?rows:null,onInput:event=>{onChange(event.target.value);profileDirty=true;}});
   return el('label',{class:`field ${wide?'span-two':''}`},el('span',{},label),control,hint?el('small',{},hint):null);
@@ -219,32 +222,54 @@ function renderProfile(){
     el('section',{class:'card form-section'},el('h2',{},icon('spark',16),'技能与原始文本'),el('div',{class:'form-grid'},inputField('已有技能',p.skills.join('，'),v=>p.skills=split(v),{wide:true,placeholder:'Python，SQL，用户研究',hint:'使用逗号分隔；只记录真实掌握的技能。'}),inputField('简历原始文本',p.resume_text,v=>p.resume_text=v,{type:'textarea',wide:true,rows:6,maxLength:30000,hint:'演示资料会保存在当前服务端会话中，请勿填入真实联系方式或其他个人敏感信息。'}))),
     el('label',{class:'checkbox-row'},el('input',{type:'checkbox',required:true,checked:state.profile_confirmed&&!profileDirty}),el('span',{},'我已核对以上内容，确认这些是用于本次公开演示的虚构资料。')),
     el('div',{class:'form-actions'},el('p',{class:'small-copy'},`正在编辑版本 ${editVersion ?? 0}。保存将使旧版分析与建议需要重新核验。`),btn('确认并保存档案',null,{style:'primary',ico:'check',key:'profile-save',type:'submit'})));
-  const importCard=el('section',{class:'card card-pad'},sectionTitle('从简历开始',null,'导入 → 人工核对 → 确认保存'),el('p',{class:'small-copy'},'粘贴文本或上传 TXT、PDF、DOCX。导入仅生成待核对草稿，不会自动确认档案。'),el('label',{class:'field gap-top'},el('span',{},'粘贴虚构简历文本'),el('textarea',{rows:8,maxlength:30000,placeholder:'例如：\n林晓｜2027 届\n示例大学，计算机科学，本科\n技能：Python、SQL\n项目：校园活动报名系统…',value:importText,onInput:event=>{importText=event.target.value;importFile=null;}})),el('label',{class:'field gap-top'},el('span',{},'或选择简历文件（不超过 2 MiB）'),el('input',{class:'file-input',type:'file',accept:'.txt,.pdf,.docx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document','aria-label':'选择 TXT、PDF 或 DOCX 简历',onChange:readImportFile})),btn('提取待核对草稿',()=>action('profile-import',async()=>{if(!importText.trim()&&!importFile)throw new Error('请先粘贴文本或选择简历文件。');const result=await api('/api/profile/import',importFile?{filename:importFile.name,content_base64:importFile.base64}:{text:importText});importedDraft=result.draft?.profile||result.draft;await refresh();},'草稿已提取。请检查并载入表单，核对后再确认保存。'),{style:'primary full-width gap-top',ico:'file',key:'profile-import'}),importFile?el('p',{class:'small-copy gap-top'},`已选择：${importFile.name}`):null,el('p',{class:'disabled-hint'},'PDF 最多 30 页，需可选中文本；不支持扫描件 OCR 或加密文档。解析失败会明确提示，不会假装读懂文件。'),importedDraft?renderImportReview():null);
+  if(!importFileInput)importFileInput=el('input',{class:'file-input',type:'file',accept:'.txt,.pdf,.docx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document','aria-label':'选择 TXT、PDF 或 DOCX 简历','aria-describedby':'import-file-status',onChange:readImportFile});
+  importFileInput.disabled=busy.has('profile-import');
+  const importCard=el('section',{class:'card card-pad'},sectionTitle('从简历开始',null,'导入 → 人工核对 → 确认保存'),el('p',{class:'small-copy'},'粘贴文本或上传 TXT、PDF、DOCX。导入仅生成待核对草稿，不会自动确认档案。'),el('label',{class:'field gap-top'},el('span',{},'粘贴虚构简历文本'),el('textarea',{rows:8,maxlength:30000,placeholder:'例如：\n林晓｜2027 届\n示例大学，计算机科学，本科\n技能：Python、SQL\n项目：校园活动报名系统…',value:importText,disabled:busy.has('profile-import'),onInput:event=>{importText=event.target.value;importFile=null;importReadId++;importReading=false;importFileInput.value='';invalidateImportDraft();updateImportStatus();}})),el('label',{class:'field gap-top'},el('span',{},'或选择简历文件（不超过 2 MiB）'),importFileInput),btn('提取待核对草稿',()=>action('profile-import',async()=>{if(importReading)throw new Error('文件正在读取，请稍候。');if(!importText.trim()&&!importFile)throw new Error('请先粘贴文本或选择简历文件。');const revision=importReadId;const result=await api('/api/profile/import',importFile?{filename:importFile.name,content_base64:importFile.base64}:{text:importText});if(revision!==importReadId)throw new Error('导入来源已变化，请重新提取当前资料。');importedDraft=result.draft?.profile||result.draft;await refresh();},'草稿已提取。请检查并载入表单，核对后再确认保存。'),{style:'primary full-width gap-top',ico:'file',key:'profile-import',id:'import-extract',disabled:importReading}),el('p',{id:'import-file-status',class:'small-copy gap-top',role:'status'},importReading?'正在读取文件，请稍候…':importFile?`已选择：${importFile.name}。下一步：提取待核对草稿。`:importText.trim()?'将使用上方粘贴的文本。':'尚未选择文件。'),el('p',{class:'disabled-hint'},'PDF 最多 30 页，需可选中文本；不支持扫描件 OCR 或加密文档。解析失败会明确提示，不会假装读懂文件。'),importedDraft?renderImportReview():null);
   const help=el('section',{class:'card card-pad'},sectionTitle('关于信息与隐私'),list(['公开演示仅使用虚构资料。','导入草稿及确认档案保存在服务器上的独立会话中，默认 24 小时过期。','规则模式不调用外部模型。模型辅助分析会逐次请求授权。','简历建议只能引用你已确认的经历和技能。']));
   return el('div',{},header('先认识你，再寻找机会。','YOUR FOUNDATION','把经历整理清楚，让之后的每一个建议都有出处。',tag(state.profile_confirmed?'已确认档案':'等待确认',state.profile_confirmed?'teal':'amber')),editVersion!==state.profile_version?notice(`服务器已有版本 ${state.profile_version}，你仍在编辑版本 ${editVersion}。请先保留修改，再载入最新版本。`):null,editVersion!==state.profile_version?btn('载入最新档案（放弃当前编辑）',async()=>{if(await confirmDialog({title:'载入服务器最新档案？',description:'当前尚未保存的表单修改将被替换。导入文本不会被删除。',confirm:'载入最新版本'})){profileDraft=normalizeProfile(state.profile);editVersion=state.profile_version;profileDirty=false;render();}},{style:'small gap-top'}):null,el('div',{class:'profile-layout'},form,el('aside',{class:'profile-aside'},importCard,help)));
 }
+function invalidateImportDraft(){
+  importedDraft=null;restoreImportDraft=false;
+  document.querySelector('#import-review')?.remove();
+}
+function updateImportStatus(){
+  const status=document.querySelector('#import-file-status');
+  if(status)status.textContent=importReading?'正在读取文件，请稍候…':importFile?`已选择：${importFile.name}。下一步：提取待核对草稿。`:importText.trim()?'将使用上方粘贴的文本。':'尚未选择文件。';
+  const extract=document.querySelector('#import-extract');
+  if(extract)extract.disabled=importReading||busy.has('profile-import');
+}
 async function readImportFile(event){
   const file=event.target.files?.[0];if(!file)return;
-  if(!/\.(txt|pdf|docx)$/i.test(file.name)){toast('支持 TXT、PDF 和 DOCX 文件；请勿上传真实个人资料。',true);event.target.value='';return;}
-  if(file.size>2*1024*1024){toast('文件超过 2 MiB，请缩小后重新选择。',true);event.target.value='';return;}
-  try{const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));importFile={name:file.name,base64:btoa(binary)};importText='';render();toast(`已选择 ${file.name}，点击提取生成待核对草稿。`);}catch{toast('无法读取文件，请尝试粘贴文本。',true);}
+  const readId=++importReadId;importFile=null;importText='';importReading=false;invalidateImportDraft();
+  if(!/\.(txt|pdf|docx)$/i.test(file.name)){event.target.value='';render();toast('支持 TXT、PDF 和 DOCX 文件；请勿上传真实个人资料。',true);return;}
+  if(!file.size||file.size>2*1024*1024){event.target.value='';render();toast(file.size?'文件超过 2 MiB，请缩小后重新选择。':'文件为空，请重新选择。',true);return;}
+  importReading=true;render();
+  try{
+    const bytes=new Uint8Array(await file.arrayBuffer());
+    if(readId!==importReadId)return;
+    let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    importFile={name:file.name,base64:btoa(binary)};
+    toast(`已选择 ${file.name}，点击提取生成待核对草稿。`);
+  }catch{if(readId===importReadId){event.target.value='';toast('无法读取文件，请重新选择或粘贴文本。',true);}}
+  finally{if(readId===importReadId){importReading=false;render();}}
 }
 function renderImportReview(){
-  const draft=normalizeProfile(importedDraft);const summary=[draft.name?`姓名：${draft.name}`:'姓名：未识别',...draft.education.map(e=>`教育：${[e.institution,e.degree,e.major,e.graduation].filter(Boolean).join(' · ')}`),...draft.experience.map(e=>`经历：${[e.organization,e.role,e.description].filter(Boolean).join(' · ')}`),...draft.projects.map(e=>`项目：${[e.name,e.description].filter(Boolean).join(' · ')}`),`技能：${draft.skills.join('、')||'未识别'}`];
-  return el('div',{class:'import-review'},el('h3',{},'待核对的导入草稿'),tag('尚未确认','amber'),el('div',{class:'import-preview'},summary.join('\n')),el('p',{},'载入只替换左侧编辑表单。请检查缺失或误识别字段，再点击“确认并保存档案”。'),btn('载入表单，继续核对',async()=>{if(profileDirty&&!(await confirmDialog({title:'用导入草稿替换当前编辑？',description:'尚未保存的表单修改将被替换；已保存的档案不变，仍需你再次确认保存。',confirm:'载入草稿'})))return;profileDraft=draft;editVersion=state.profile_version;profileDirty=true;render();toast('已载入草稿。请逐项核对，然后确认保存。');},{style:'small full-width gap-top'}));
+  const source=importedDraft,revision=importReadId,draft=normalizeProfile(source);const summary=[draft.name?`姓名：${draft.name}`:'姓名：未识别',...draft.education.map(e=>`教育：${[e.institution,e.degree,e.major,e.graduation].filter(Boolean).join(' · ')}`),...draft.experience.map(e=>`经历：${[e.organization,e.role,e.description].filter(Boolean).join(' · ')}`),...draft.projects.map(e=>`项目：${[e.name,e.description].filter(Boolean).join(' · ')}`),`技能：${draft.skills.join('、')||'未识别'}`];
+  return el('div',{class:'import-review',id:'import-review'},el('h3',{},'待核对的导入草稿'),tag('尚未确认','amber'),el('div',{class:'import-preview'},summary.join('\n')),el('p',{},'载入只替换左侧编辑表单。请检查缺失或误识别字段，再点击“确认并保存档案”。'),btn('载入表单，继续核对',async()=>{const editor=profileDraft,version=editVersion;const current=()=>route==='profile'&&revision===importReadId&&source===importedDraft&&!importReading&&!busy.has('profile-import')&&editor===profileDraft&&version===editVersion;if(!current()){toast('草稿或编辑状态已变化，请重新核对后再载入。',true);return;}if(profileDirty&&!(await confirmDialog({title:'用导入草稿替换当前编辑？',description:'尚未保存的表单修改将被替换；已保存的档案不变，仍需你再次确认保存。',confirm:'载入草稿'})))return;if(!current()){toast('草稿或编辑状态已变化，请重新核对后再载入。',true);return;}profileDraft=draft;editVersion=state.profile_version;profileDirty=true;render();const form=document.querySelector('#profile-form');form?.scrollIntoView?.({block:'start',behavior:'smooth'});form?.querySelector?.('input')?.focus?.({preventScroll:true});toast('已载入草稿。请逐项核对，然后确认保存。');},{style:'small full-width gap-top',disabled:importReading||busy.has('profile-import')}));
 }
 function renderRadar(){
   const form=el('form',{class:'search-form',onSubmit:event=>{event.preventDefault();searchJobs();}},el('div',{class:'search-field'},el('label',{for:'search-query'},'岗位关键词'),el('input',{id:'search-query',value:searchDraft.query,placeholder:'例如：产品、开发、数据分析',maxlength:120,onInput:event=>searchDraft.query=event.target.value})),el('div',{class:'search-field'},el('label',{for:'search-type'},'招聘类型'),el('select',{id:'search-type',onChange:event=>searchDraft.recruitment_type=event.target.value},Object.entries(TYPE).map(([id,label])=>el('option',{value:id,selected:searchDraft.recruitment_type===id},label)))),el('div',{class:'search-field'},el('label',{for:'search-city'},'意向城市'),el('input',{id:'search-city',value:searchDraft.cities,placeholder:'不限 / 多城市用逗号分隔',maxlength:100,onInput:event=>searchDraft.cities=event.target.value})),btn('搜索官方来源',null,{style:'primary',ico:'search',type:'submit',key:'search'}));
   const run=lastSearchRun || array(state.runs).filter(r=>(r.kind||r.type||r.action)==='search').at(-1);
   const failures=array(run?.failures||run?.result?.failures);
   const sourceSummary=array(run?.source_summary||run?.result?.source_summary);
-  return el('div',{},header('下一份机会，值得认真发现。','OPPORTUNITY RADAR','优先中国校招与实习。来源、核验状态和未知信息，始终可见。'),el('section',{class:'card search-card'},form,el('p',{class:'search-help'},icon('shield',12),'默认探索字节跳动官方校招详情及相关岗位，范围有限，非全网搜索。其他来源须由服务端明确配置；搜索不发送你的档案。'),searchDraft.recruitment_type==='all'?el('p',{class:'search-help'},'已选择所有招聘类型；可能包含非校招岗位。不会因零结果自动扩大来源或地区范围。'):null),busy.has('search')?notice('正在向官方招聘来源发起请求，请稍候。完成前不代表已发现或核验任何岗位。','info'):null,failures.length?notice(el('div',{},el('strong',{},`${failures.length} 个来源未成功获取`),el('div',{class:'run-failures'},failures.map(f=>el('p',{},text(f)))))):null,sourceSummary.length?renderSourceSummary(sourceSummary,run):null,el('div',{class:'radar-toolbar'},el('strong',{},`工作台共 ${jobs().length} 条记录`),el('span',{},'包含示例与历史搜索；请查看每条记录的来源标签')),jobs().length?el('div',{class:'radar-grid'},el('section',{class:'jobs-list','aria-label':'岗位列表'},jobs().map((job,index)=>el('button',{class:`job-card ${String(job.id)===String(selectedId)?'selected':''}`,type:'button','aria-pressed':String(job.id)===String(selectedId),onClick:()=>{selectedId=job.id;render();}},el('div',{class:'job-card-top'},companyLogo(job,index),el('div',{},el('h3',{},job.title||'未命名岗位'),el('p',{},`${job.company||'企业待确认'} · ${text(job.city)||'地点待确认'}`))),jobTags(job),el('div',{class:'job-card-meta'},el('span',{},statusName(job.tracker_status)),el('span',{},job.verification?.verified_at?`核验于 ${formatDate(job.verification.verified_at)}`:'尚无核验时间'))))),selected()?renderJobDetail(selected()):empty('选择一个岗位','查看岗位描述、来源证据和下一步。')):empty('尚未发现符合条件的岗位','尝试调整关键词或城市。招聘公告与岗位详情会分别标记；来源不可用会明确显示。',null,'search'));
+  return el('div',{},header('下一份机会，值得认真发现。','OPPORTUNITY RADAR','优先中国校招与实习。来源、核验状态和未知信息，始终可见。'),el('section',{class:'card search-card'},form,el('p',{class:'search-help'},icon('shield',12),'本轮最多约45秒，部分来源可能失败。长鑫来源为实验性，线上验收未通过。查询服务端已配置的官方来源。显式岗位关键词会发送至支持搜索的官方招聘网站，不会自动取用档案或简历。请勿在关键词中填写个人资料、联系方式或凭据；自动拦截并非完全保证。字节为关联图探索，其他已接入中国企业支持有界分页，均非全网搜索。'),searchDraft.recruitment_type==='all'?el('p',{class:'search-help'},'已选择所有招聘类型；可能包含非校招岗位。不会因零结果自动扩大来源或地区范围。'):null),busy.has('search')?notice('正在向官方招聘来源发起请求，请稍候。完成前不代表已发现或核验任何岗位。','info'):null,failures.length?notice(el('div',{},el('strong',{},`${failures.length} 条来源错误`),el('div',{class:'run-failures'},failures.map(f=>el('p',{},text(f)))))):null,sourceSummary.length?renderSourceSummary(sourceSummary,run):null,el('div',{class:'radar-toolbar'},el('strong',{},`工作台共 ${jobs().length} 条记录`),el('span',{},'包含示例与历史搜索；请查看每条记录的来源标签')),jobs().length?el('div',{class:'radar-grid'},el('section',{class:'jobs-list','aria-label':'岗位列表'},jobs().map((job,index)=>el('button',{class:`job-card ${String(job.id)===String(selectedId)?'selected':''}`,type:'button','aria-pressed':String(job.id)===String(selectedId),onClick:()=>{selectedId=job.id;render();}},el('div',{class:'job-card-top'},companyLogo(job,index),el('div',{},el('h3',{},job.title||'未命名岗位'),el('p',{},`${job.company||'企业待确认'} · ${text(job.city)||'地点待确认'}`))),jobTags(job),el('div',{class:'job-card-meta'},el('span',{},statusName(job.tracker_status)),el('span',{},job.verification?.verified_at?`核验于 ${formatDate(job.verification.verified_at)}`:'尚无核验时间'))))),selected()?renderJobDetail(selected()):empty('选择一个岗位','查看岗位描述、来源证据和下一步。')):empty('尚未发现符合条件的岗位','尝试调整关键词或城市。招聘公告与岗位详情会分别标记；来源不可用会明确显示。',null,'search'));
 }
 function renderSourceSummary(summaries,run){
   const status={ok:'获取完成',partial:'部分失败',failed:'获取失败',not_run_budget_exhausted:'预算用尽，未运行'};
-  return el('details',{class:'source-results card',open:run?.status==='failed'},el('summary',{},`本次搜索来源记录 · ${summaries.length} 个来源 · ${formatDate(run?.finished_at||run?.started_at)}`),summaries.map(source=>el('div',{class:'source-result-row'},el('div',{class:'tags'},tag({bytedance:'字节跳动官方招聘',ashby:'已配置的 Ashby 招聘站'}[source.source]||source.source||'未命名来源'),tag(status[source.status]||source.status||'状态未知',source.status==='ok'?'teal':'amber')),el('p',{},`请求 ${source.requests??'未提供'} 次 · 核验 ${source.verified??'未提供'} 条 · 返回 ${source.returned??'未提供'} 条`),el('p',{},source.source==='bytedance'?'基于官方详情关联图的有界探索，不覆盖全部校招岗位。':source.source==='ashby'?'仅查询明确配置的全球招聘站点，不代表中国校招覆盖。':text(source.scope)||'来源范围未提供'))));
+  const reasons={completed:'本次范围已读完',page_limit_reached:'已达分页上限，仍有未查岗位',repeated_page:'来源重复返回同一页，已停止',source_request_budget_exhausted:'已达分源请求上限',source_request_or_time_budget_exhausted:'已达分源请求或时间上限',time_budget_exhausted:'时间预算用尽',network_timeout:'来源请求超时',network_failure:'来源网络错误',http_401:'来源要求登录，已暂停',http_403:'来源拒绝访问，已暂停',http_429:'来源限流，已停止并遵守冷却时间',source_paused_http_401:'来源要求登录，等待服务端复核',source_paused_http_403:'来源拒绝访问，等待服务端复核',source_paused_http_429:'来源限流冷却中，本次未请求',recruitment_category_unavailable:'官网未提供所选招聘分类',unsafe_search_keywords:'关键词包含联系方式或敏感信息，未发送'};
+  return el('details',{class:'source-results card',open:run?.status==='failed'||summaries.some(s=>s.truncated)},el('summary',{},`本次搜索来源记录 · ${summaries.length} 个来源 · ${formatDate(run?.finished_at||run?.started_at)}`),summaries.map(source=>el('div',{class:'source-result-row'},el('div',{class:'tags'},tag({bytedance:'字节跳动官方招聘',cxmt:'长鑫官方招聘 · 实验性',ashby:'已配置的 Ashby 招聘站'}[source.source]||source.company||source.source||'未命名来源'),tag(status[source.status]||source.status||'状态未知',source.status==='ok'?'teal':'amber')),el('p',{},`请求尝试 ${source.requests??'未提供'} 次 · 核验 ${source.verified??'未提供'} 条 · 返回 ${source.returned??'未提供'} 条`),el('p',{},source.source==='bytedance'?'基于官方详情关联图的有界探索，不覆盖全部校招岗位。':source.source==='ashby'?'仅查询明确配置的全球招聘站点，不代表中国校招覆盖。':text(source.scope)||'来源范围未提供'),source.pages!==undefined?el('p',{},`本轮读取 ${source.pages} 页 · 每页最多 ${source.page_size} 条${source.total_available!==undefined?` · 来源报告共 ${source.total_available} 条（非本轮核验数）`:''}`):null,source.verification_mode==='official_complete_jd_listing'?el('p',{},'核验方式：官方完整JD列表，含岗位身份、职责、要求及开放状态；未逐条打开详情页。'):null,source.stop_reason?el('p',{},`停止原因：${reasons[source.stop_reason]||source.stop_reason}`):null)));
 }
-async function searchJobs(){await action('search',async()=>{const result=await api('/api/search',{query:searchDraft.query.trim(),recruitment_type:searchDraft.recruitment_type,cities:split(searchDraft.cities)});lastSearchRun=result.run||{failures:result.failures};await refresh();if(array(result.jobs).length)selectedId=result.jobs[0].id;const count=array(result.jobs).length;toast(count?`本次搜索返回 ${count} 条记录，请检查来源与招聘状态。`:'本次搜索未返回匹配岗位。请查看来源记录或调整条件。');});}
+async function searchJobs(){await action('search',async()=>{clearSearchErrorToast();const result=await api('/api/search',{query:searchDraft.query.trim(),recruitment_type:searchDraft.recruitment_type,cities:split(searchDraft.cities)});lastSearchRun=result.run||{failures:result.failures};await refresh();if(array(result.jobs).length)selectedId=result.jobs[0].id;const count=array(result.jobs).length;clearSearchErrorToast();toast(count?`本次搜索返回 ${count} 条记录，请检查来源与招聘状态。`:'本次搜索未返回匹配岗位。请查看来源记录或调整条件。');});}
 function renderSource(job){
   const v=job.verification||{};const url=job.record_type==='demo'?null:safeURL(job.canonical_url);
   return el('div',{class:'source-box'},el('div',{class:'detail-label'},'来源与核验记录'),el('p',{},`来源：${text(v.source)||'未提供'}`),el('p',{},`核验状态：${v.status||'unknown'} · ${formatDate(v.verified_at)}`),el('p',{},`证据：${text(v.evidence)||'暂无可核验证据；请打开原始页面核实。'}`),url?el('a',{href:url,target:'_blank',rel:'noopener noreferrer'},job.record_type==='demo'?'示例链接（不代表真实招聘）':'打开原始招聘页面',icon('external',11)):el('p',{},job.record_type==='demo'?'虚构示例，没有真实招聘页面或可投递入口。':'暂无有效原始链接'));
@@ -266,7 +291,7 @@ async function analyze(job,resume=false){
     const allowed=await confirmDialog({title:resume?`允许 ${provider.label} 辅助简历建议？`:`允许 ${provider.label} 辅助匹配分析？`,description:`本次操作会将已确认的最少必要经历、项目、技能及目标岗位描述发送至 ${provider.destination}；姓名和联系方式不发送。结果仍受确定性资格校验约束。请仅使用虚构资料。`,check:`我同意本次将上述虚构资料发送至 ${provider.label}。`,confirm:'允许并继续'});
     if(!allowed)return;
   }
-  await action(key,async()=>{await api(jobPath(job,resume?'resume':'analyze'),configured?{model_consent:approvedProvider}:{});await refresh();},resume?'简历建议已生成，请逐条核对原文、建议和证据。':'分析已完成。请同时关注未知项与硬性要求。');
+  await action(key,async()=>{const result=await api(jobPath(job,resume?'resume':'analyze'),configured?{model_consent:approvedProvider}:{});await refresh();toast(resume?(array(result.resume?.suggestions).length?'简历建议已生成，请逐条核对原文、建议和证据。':'本次检查已完成，未生成可核对的简历建议。'):'分析已完成。请同时关注未知项与硬性要求。');});
 }
 
 function renderAnalysis(){
@@ -334,6 +359,8 @@ async function updateTrack(job,status,note){
   if(busy.has(`track:${job.id}`))return;
   const current=jobs().find(item=>String(item.id)===String(job.id))||job;
   if((current.submission_unresolved||current.tracker_status==='submission_unknown')&&!['submission_unknown','submitted'].includes(status)){toast('提交结果仍待核实。请先检查招聘网站；仅能保持未知，或明确确认已自行完成投递后记录为已投递。',true);return;}
+  const currentStatus=current.submission_unresolved?'submission_unknown':current.tracker_status;
+  if(status===currentStatus&&!note.trim()){toast('阶段和备注未变化，无需保存。');return;}
   let attestation=false;
   if(status==='submitted'){
     attestation=await confirmDialog({title:'确认你已自行完成外部投递？',description:`岗位：${job.company} · ${job.title}。本操作只保存跟进记录，不会替你向招聘网站提交申请，也不能证明招聘方已收到。`,check:'我确认已自行在招聘方渠道完成此次投递，并希望标记为手动记录。',confirm:'确认并记录已投递'});
