@@ -19,3 +19,8 @@ The Python and SQLite runtime licenses also apply. Browser binaries have their o
 The starting Career Desk code was supplied by the project owner. Its archive did not contain an explicit project-wide license. This audit does not infer a third party's permission or assign an open-source license on the owner's behalf. Select a project license before inviting external code reuse.
 
 Job descriptions and employer branding are third-party content, not licensed by this application's code license. Public endpoints and robots rules do not imply unrestricted redistribution. Keep source attribution, limited supporting excerpts, timestamps and links; obtain permission for broader aggregation or bulk redistribution.
+
+
+## Recruitment adapter design reference
+
+CareerSail's Beisen adapter (https://github.com/genius916/CareerSail/blob/main/lib/recruiters/beisen.js) was read as an interface-design reference on 2026-10-10. Its repository carries an MIT license (https://github.com/genius916/CareerSail/blob/main/LICENSE). No CareerSail implementation code is copied, bundled or executed here; the Python provider is independently authored and validated against the employer's public website. In particular, fallback category IDs, pre-existing “verified” labels, browser impersonation and application-submission behavior are not adopted. The site's own scripts were read only to establish public API semantics, not copied into release assets.
