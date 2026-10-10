@@ -19,6 +19,17 @@ MAX_RESPONSE = 512 * 1024
 MAX_REQUEST = 100 * 1024
 REQUEST_TIMEOUT = 25
 
+# Illustration only, never added to reviewed_evidence or the validator's facts.
+RESUME_EXAMPLE_EVIDENCE = {
+    "id": "example_only/projects/0/description",
+    "text": "Maintained a fictional project checklist.\nCompared prompt templates on a synthetic question set.\nThis was a classroom exercise, not production deployment.",
+}
+RESUME_EXAMPLE_RESULT = {"suggestions": [{
+    "before": RESUME_EXAMPLE_EVIDENCE["text"],
+    "after": "Compared prompt templates on a synthetic question set.\nMaintained a fictional project checklist.\nThis was a classroom exercise, not production deployment.",
+    "reason": "reorder", "evidence_ids": [RESUME_EXAMPLE_EVIDENCE["id"]],
+}]}
+
 
 class ModelError(Exception):
     """Safe, categorical failure; never contains credentials or response bodies."""
@@ -169,6 +180,24 @@ def request_json(task, payload, schema, *, opener=None):
         "paragraphs from that same description, optionally reordered, without rewriting or omission. Omit unsupported suggestions. "
         "Use reason values select, reorder, or prioritize. Return only JSON matching the requested schema."
     )
+    if task == "resume_evidence":
+        instructions += (
+            " For this resume task, identify supplied experience/project descriptions that directly "
+            "support a responsibility or topic in data.untrusted_job. Highlight existing evidence by "
+            "selecting the entire relevant description or putting its relevant whole paragraphs first. "
+            "Selection is useful even when no wording changes: before and after may be identical, "
+            "with reason select or prioritize. Use reorder only when paragraph order changes usefully. "
+            "Copy before exactly from one data.reviewed_evidence text and cite its supplied ID. "
+            "Keep every paragraph, including limitations, negations and fictional-example labels. "
+            "Do not combine descriptions, rewrite text or add facts. Return suggestions: [] when no "
+            "supplied description is applicable; never invent a suggestion to fill a quota. "
+            "The following NONEMPTY FORMAT ILLUSTRATION uses synthetic evidence, not candidate data. "
+            "Its example_only ID and text MUST NOT be cited or copied into the actual answer. "
+            "Only data.reviewed_evidence supplies admissible evidence for the actual answer. "
+            "Illustration target: compare prompt templates in a model-evaluation project. "
+            "Illustration evidence: " + json.dumps(RESUME_EXAMPLE_EVIDENCE) +
+            " Illustration output: " + json.dumps(RESUME_EXAMPLE_RESULT)
+        )
     try:
         user_data = json.dumps({"task": task, "data": payload}, ensure_ascii=False, allow_nan=False)
         if provider == "deepseek":
@@ -179,7 +208,7 @@ def request_json(task, payload, schema, *, opener=None):
             body = {"model": name, "max_tokens": 2500, "stream": False,
                     "thinking": {"type": "disabled"}, "response_format": {"type": "json_object"},
                     "messages": [{"role": "system", "content": instructions + " JSON schema: " + json.dumps(schema) +
-                                 " Empty JSON result example: " + json.dumps({"strengths" if task == "match_evidence" else "suggestions": []})},
+                                 (" Empty JSON result example: " + json.dumps({"strengths": []}) if task == "match_evidence" else "")},
                                  {"role": "user", "content": user_data}]}
         else:
             api_url = API_URL

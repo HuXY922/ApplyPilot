@@ -1,7 +1,7 @@
 """Bounded official discovery, transparent eligibility rules and grounded guidance.
 
-Search fetches configured public boards without transmitting queries or applicant
-facts. Source parsing establishes what the listing says, never who qualifies.
+Search fetches configured official sources. Reviewed search providers receive
+only explicit job keywords, never applicant profiles; legacy graphs filter locally. Source parsing establishes what the listing says, never who qualifies.
 The optional model only selects reviewed evidence; deterministic gates win.
 """
 from __future__ import annotations
@@ -14,24 +14,63 @@ import math
 import os
 import re
 import socket
+import selectors
+import subprocess
+import sys
+from pathlib import Path
 import time
+import threading
+from email.utils import parsedate_to_datetime
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-from . import model
+from . import model, official_sources
 
 BYTE_ORIGIN = "https://jobs.bytedance.com"
 DEFAULT_SEEDS = ("7667889560824154373", "7667892775577733429", "7667837272777541893")
 SOURCE_LABEL = "ByteDance official careers website endpoint (undocumented; not a licensed search API)"
-ALLOWED_HOSTS = frozenset(("jobs.bytedance.com", "api.ashbyhq.com"))
-MAX_DISCOVERY_SECONDS = 30
+ALLOWED_HOSTS = frozenset(("jobs.bytedance.com", "api.ashbyhq.com")) | official_sources.BEISEN_HOSTS
+MAX_DISCOVERY_SECONDS = 45
+MAX_SOURCE_SECONDS = 30
+SOURCE_REQUEST_TIMEOUTS = {"jobs.bytedance.com": 7, "cxmt.zhiye.com": 12, "api.ashbyhq.com": 12}
 MAX_DISCOVERY_REQUESTS = 6
+_SOURCE_COOLDOWNS = {}
+_SOURCE_COOLDOWN_LOCK = threading.Lock()
+_SOURCE_FETCH_SLOT = threading.BoundedSemaphore(1)
+_SOURCE_WORKER = str(Path(__file__).with_name("source_worker.py").resolve())
 
 
-class SourceError(Exception):
-    pass
+def _pause_source(host, code, retry_after=None):
+    """Single-worker deployment shares pauses across user sessions/threads."""
+    if code not in (401, 403, 429):
+        return
+    until = float("inf")
+    if code == 429:
+        until = time.time() + 60
+        if retry_after:
+            try:
+                text = str(retry_after).strip()
+                until = time.time() + max(0, int(text)) if text.isdigit() else parsedate_to_datetime(text).timestamp()
+                until = max(time.time() + 1, until)
+            except (TypeError, ValueError, OverflowError):
+                pass
+    with _SOURCE_COOLDOWN_LOCK:
+        previous = _SOURCE_COOLDOWNS.get(host, (0, ""))
+        if until >= previous[0]:
+            _SOURCE_COOLDOWNS[host] = (until, "source_paused_http_" + str(code))
+
+
+def _check_source_pause(host):
+    with _SOURCE_COOLDOWN_LOCK:
+        until, reason = _SOURCE_COOLDOWNS.get(host, (0, ""))
+        if time.time() < until:
+            raise SourceError(reason)
+        _SOURCE_COOLDOWNS.pop(host, None)
+
+
+SourceError = official_sources.SourceError
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -54,12 +93,33 @@ def _list_strings(value, limit=20):
     return [_clean(x, 160) for x in value[:limit] if isinstance(x, str) and x.strip()] if isinstance(value, list) else []
 
 
-class Transport:
+def _validate_source_destination(url, body=None):
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or parsed.hostname not in ALLOWED_HOSTS
+            or parsed.netloc != parsed.hostname or parsed.query and parsed.hostname == "api.ashbyhq.com"
+            or parsed.fragment):
+        raise SourceError("destination_denied")
+    method = "GET" if body is None else "POST"
+    if parsed.hostname in official_sources.BEISEN_HOSTS:
+        if not official_sources.endpoint_allowed(parsed, method, body):
+            raise SourceError("destination_denied")
+    elif method != "GET":
+        raise SourceError("destination_denied")
+    elif parsed.hostname == "jobs.bytedance.com":
+        if not re.fullmatch(r"/api/v1/job/posts/[0-9]{10,25}", parsed.path) or parsed.query != "portal_type=3&with_recommend=true":
+            raise SourceError("destination_denied")
+    elif not re.fullmatch(r"/posting-api/job-board/[A-Za-z0-9_-]{1,80}", parsed.path):
+        raise SourceError("destination_denied")
+    return parsed
+
+
+class _DirectTransport:
     """Fixed public hosts, no redirects/auth, DNS guard, byte and time bounds."""
-    def __init__(self):
+    def __init__(self, proxy=None):
         # Process deployment configuration only. HTTP inputs never choose a
         # proxy, host, URL or source. The proxy resolves the fixed public host.
-        self.proxy = urllib.request.getproxies().get("https", "")
+        self.proxy = urllib.request.getproxies().get("https", "") if proxy is None else proxy
+        self.explicit_proxy = proxy is not None
         if self.proxy:
             try:
                 parsed = urlsplit(self.proxy)
@@ -74,25 +134,30 @@ class Transport:
             urllib.request.ProxyHandler({"https": self.proxy} if self.proxy else {}), NoRedirect())
 
     def get(self, url, *, max_bytes=1024 * 1024, timeout=7, deadline=None):
+        return self._request(url, max_bytes=max_bytes, timeout=timeout, deadline=deadline)
+
+    def post(self, url, *, body, max_bytes=1024 * 1024, timeout=7, deadline=None):
+        return self._request(url, body=body, max_bytes=max_bytes, timeout=timeout, deadline=deadline)
+
+    def _request(self, url, *, body=None, max_bytes, timeout, deadline):
         try:
-            parsed = urlsplit(url)
-            if (parsed.scheme != "https" or parsed.hostname not in ALLOWED_HOSTS
-                    or parsed.netloc != parsed.hostname or parsed.query and parsed.hostname == "api.ashbyhq.com"
-                    or parsed.fragment):
-                raise SourceError("destination_denied")
-            if parsed.hostname == "jobs.bytedance.com":
-                if not re.fullmatch(r"/api/v1/job/posts/[0-9]{10,25}", parsed.path) or parsed.query != "portal_type=3&with_recommend=true":
-                    raise SourceError("destination_denied")
-            elif not re.fullmatch(r"/posting-api/job-board/[A-Za-z0-9_-]{1,80}", parsed.path):
-                raise SourceError("destination_denied")
-            via_proxy = bool(self.proxy) and not urllib.request.proxy_bypass(parsed.hostname)
+            parsed = _validate_source_destination(url, body)
+            _check_source_pause(parsed.hostname)
+            via_proxy = bool(self.proxy) and (self.explicit_proxy or not urllib.request.proxy_bypass(parsed.hostname))
             self.transport_mode = "configured_proxy_dns" if via_proxy else "direct_dns"
             if not via_proxy:
                 addresses = socket.getaddrinfo(parsed.hostname, 443, type=socket.SOCK_STREAM)
                 if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
                     raise SourceError("private_network_denied")
-            request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "ApplyPilot/0.1 (bounded public job discovery)"})
-            source_timeout = 12 if parsed.hostname == "api.ashbyhq.com" else 7
+            headers = {"Accept": "application/json,text/html;q=0.8", "User-Agent": "ApplyPilot/0.1 (bounded public job discovery)"}
+            data = None
+            if body is not None:
+                data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                if len(data) > 4096:
+                    raise SourceError("request_too_large")
+                headers["Content-Type"] = "application/json"
+            request = urllib.request.Request(url, data=data, headers=headers)
+            source_timeout = SOURCE_REQUEST_TIMEOUTS.get(parsed.hostname, 7)
             with self.opener.open(request, timeout=max(.1, min(timeout, source_timeout))) as response:
                 if response.getcode() != 200:
                     raise SourceError("http_" + str(response.getcode()))
@@ -111,15 +176,136 @@ class Transport:
         except SourceError:
             raise
         except urllib.error.HTTPError as exc:
-            raise SourceError("http_" + str(exc.code)) from None
+            # Stop the source. Never retry a 429 before its full Retry-After;
+            # 401/403 require operator review/restart rather than an auth bypass.
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            _pause_source(parsed.hostname, exc.code, retry_after)
+            error = SourceError("http_" + str(exc.code))
+            error.retry_after = retry_after
+            raise error from None
+        except (TimeoutError, socket.timeout):
+            raise SourceError("network_timeout") from None
+        except urllib.error.URLError as exc:
+            reason = "network_timeout" if isinstance(exc.reason, (TimeoutError, socket.timeout)) else "network_failure"
+            raise SourceError(reason) from None
         except Exception:
             raise SourceError("network_failure") from None
+
+
+class Transport(_DirectTransport):
+    """Parent-enforced wall-clock cap includes DNS, connect, TLS and body reads.
+
+    All network work runs in one fixed, secret-free, resource-capped child. A
+    timed-out child is killed and reaped before the request slot is released.
+    There is no in-process or background-thread fallback on worker failure.
+    """
+    def _request(self, url, *, body=None, max_bytes, timeout, deadline):
+        parsed = _validate_source_destination(url, body)
+        _check_source_pause(parsed.hostname)
+        via_proxy = bool(self.proxy) and not urllib.request.proxy_bypass(parsed.hostname)
+        self.transport_mode = "configured_proxy_dns" if via_proxy else "direct_dns"
+        source_limit = SOURCE_REQUEST_TIMEOUTS.get(parsed.hostname, 7)
+        hard_deadline = min(time.monotonic() + min(float(timeout), source_limit),
+                            deadline if deadline is not None else float("inf"))
+        if not math.isfinite(hard_deadline) or time.monotonic() >= hard_deadline:
+            raise SourceError("time_budget_exhausted")
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 3 * 1024 * 1024:
+            raise SourceError("response_limit_invalid")
+        payload = json.dumps({"url": url, "body": body, "max_bytes": max_bytes,
+                              "timeout": min(float(timeout), source_limit), "deadline": hard_deadline,
+                              "proxy": self.proxy if via_proxy else ""}, ensure_ascii=True).encode()
+        if len(payload) > 4096:
+            raise SourceError("request_too_large")
+        if not _SOURCE_FETCH_SLOT.acquire(blocking=False):
+            raise SourceError("source_fetch_busy")
+        process = None
+        try:
+            process = subprocess.Popen([sys.executable, "-I", "-S", "-B", _SOURCE_WORKER],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                       env={}, close_fds=True, shell=False, bufsize=0)
+            output, sent = bytearray(), 0
+            os.set_blocking(process.stdin.fileno(), False)
+            os.set_blocking(process.stdout.fileno(), False)
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdin, selectors.EVENT_WRITE, "input")
+                selector.register(process.stdout, selectors.EVENT_READ, "output")
+                while selector.get_map():
+                    remaining = hard_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise SourceError("network_timeout")
+                    for key, _ in selector.select(remaining):
+                        if key.data == "input":
+                            sent += os.write(key.fd, payload[sent:])
+                            if sent == len(payload):
+                                selector.unregister(key.fileobj)
+                                key.fileobj.close()
+                        else:
+                            chunk = os.read(key.fd, min(65536, max_bytes + 2049 - len(output)))
+                            if not chunk:
+                                selector.unregister(key.fileobj)
+                                key.fileobj.close()
+                            else:
+                                output.extend(chunk)
+                                if len(output) > max_bytes + 2048:
+                                    raise SourceError("response_too_large")
+            remaining = hard_deadline - time.monotonic()
+            if remaining <= 0:
+                raise SourceError("network_timeout")
+            process.wait(timeout=remaining)
+            if process.returncode == 124:
+                raise SourceError("network_timeout")
+            if process.returncode != 0:
+                raise SourceError("source_worker_failed")
+            header, separator, raw = bytes(output).partition(b"\n")
+            if not separator or len(header) > 2048:
+                raise SourceError("source_worker_protocol")
+            try:
+                control = json.loads(header)
+            except (ValueError, UnicodeError):
+                raise SourceError("source_worker_protocol") from None
+            if not isinstance(control, dict):
+                raise SourceError("source_worker_protocol")
+            if control.get("ok") is True:
+                if set(control) != {"ok", "size"} or type(control["size"]) is not int or control["size"] != len(raw) or len(raw) > max_bytes:
+                    raise SourceError("source_worker_protocol")
+                return raw
+            if set(control) - {"ok", "error", "retry_after"} or control.get("ok") is not False or raw:
+                raise SourceError("source_worker_protocol")
+            reason = control.get("error")
+            if not isinstance(reason, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,99}", reason):
+                raise SourceError("source_worker_protocol")
+            if reason in ("http_401", "http_403", "http_429"):
+                retry_after = control.get("retry_after")
+                if retry_after is not None and (not isinstance(retry_after, str) or len(retry_after) > 256):
+                    raise SourceError("source_worker_protocol")
+                _pause_source(parsed.hostname, int(reason.split("_")[1]), retry_after)
+            raise SourceError(reason)
+        except subprocess.TimeoutExpired:
+            raise SourceError("network_timeout") from None
+        except SourceError:
+            raise
+        except (OSError, ValueError, TypeError, KeyError):
+            raise SourceError("source_worker_failed") from None
+        finally:
+            try:
+                if process is not None:
+                    if process.poll() is None:
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                    process.wait()
+                    for stream in (process.stdin, process.stdout):
+                        if stream is not None and not stream.closed:
+                            stream.close()
+            finally:
+                _SOURCE_FETCH_SLOT.release()
 
 
 def _json(http, url, deadline, max_bytes):
     if time.monotonic() >= deadline:
         raise SourceError("time_budget_exhausted")
-    source_timeout = 12 if urlsplit(url).hostname == "api.ashbyhq.com" else 7
+    source_timeout = SOURCE_REQUEST_TIMEOUTS.get(urlsplit(url).hostname, 7)
     raw = http.get(url, max_bytes=max_bytes, timeout=min(source_timeout, deadline - time.monotonic()), deadline=deadline)
     if not isinstance(raw, bytes) or len(raw) > max_bytes:
         raise SourceError("response_too_large_or_invalid")
@@ -213,7 +399,7 @@ def _ashby_job(row, board, digest, now):
 
 
 def _source_config():
-    sources = [s.strip() for s in os.environ.get("APPLYPILOT_SOURCES", "bytedance").split(",") if s.strip()]
+    sources = [s.strip() for s in os.environ.get("APPLYPILOT_SOURCES", "bytedance,cxmt").split(",") if s.strip()]
     boards = [s.strip() for s in os.environ.get("APPLYPILOT_ASHBY_BOARDS", "").split(",") if s.strip()]
     return {"sources": sources, "bytedance_seed_ids": list(DEFAULT_SEEDS), "ashby_boards": boards,
             "max_requests": MAX_DISCOVERY_REQUESTS}
@@ -221,7 +407,9 @@ def _source_config():
 
 def _city_key(value):
     aliases = {"shanghai": "上海", "beijing": "北京", "shenzhen": "深圳", "guangzhou": "广州", "hangzhou": "杭州"}
-    return aliases.get(value.strip().casefold().removesuffix("市"), value.strip().casefold().removesuffix("市"))
+    # Official Beisen cities can include province prefixes, e.g. 安徽省·合肥市.
+    city = re.split(r"[·•]", value.strip())[-1].casefold().removesuffix("市")
+    return aliases.get(city, city)
 
 
 def _matches(job, query, recruitment_type, cities):
@@ -236,7 +424,7 @@ def _matches(job, query, recruitment_type, cities):
 
 
 def discover(query="", recruitment_type="campus", cities=None, **optional):
-    """Fetch bounded configured sources; query/city filtering happens locally.
+    """Fetch bounded sources; reviewed search providers also receive job keywords.
 
     source_config/http/pause are server-side test seams, never HTTP input fields.
     A zero-result run does not broaden source geography or use cached fixtures.
@@ -252,7 +440,7 @@ def discover(query="", recruitment_type="campus", cities=None, **optional):
     pause = optional.get("pause", time.sleep)
     try:
         sources = cfg.get("sources", ["bytedance"])
-        if not isinstance(sources, list) or not sources or any(s not in ("bytedance", "ashby") for s in sources):
+        if not isinstance(sources, list) or not sources or any(s not in ("bytedance", "ashby", *official_sources.BEISEN_SOURCES) for s in sources):
             raise ValueError()
         seeds = cfg.get("bytedance_seed_ids", list(DEFAULT_SEEDS))
         boards = cfg.get("ashby_boards", [])
@@ -272,14 +460,20 @@ def discover(query="", recruitment_type="campus", cities=None, **optional):
         if job["id"] not in seen_jobs and _matches(job, query, recruitment_type, cities or []):
             seen_jobs.add(job["id"])
             jobs.append(job)
-    for source in dict.fromkeys(sources):
+    ordered_sources = list(dict.fromkeys(sources))
+    for source_index, source in enumerate(ordered_sources):
+        remaining_sources = len(ordered_sources) - source_index
+        source_budget = max(0, (budget - requests) // remaining_sources)
+        source_start = time.monotonic()
+        source_deadline = min(deadline, source_start + min(MAX_SOURCE_SECONDS, max(0, deadline - source_start) / remaining_sources))
         summary = {"source": source, "status": "ok", "requests": 0, "verified": 0, "returned": 0,
                    "scope": "China campus-related official detail graph; not exhaustive search" if source == "bytedance" else "Explicitly configured global ATS boards; not China-campus coverage",
-                   "method": SOURCE_LABEL if source == "bytedance" else "Documented public job-posting API", "bounded": True}
+                   "method": SOURCE_LABEL if source == "bytedance" else "Documented public job-posting API", "bounded": True,
+                   "request_budget": source_budget, "truncated": False}
         before = len(jobs)
         if source == "bytedance":
             queue, seen = list(seeds), set()
-            while queue and requests < budget and time.monotonic() < deadline:
+            while queue and summary["requests"] < source_budget and time.monotonic() < source_deadline:
                 ident = queue.pop(0)
                 if ident in seen:
                     continue
@@ -288,7 +482,7 @@ def discover(query="", recruitment_type="campus", cities=None, **optional):
                 summary["requests"] += 1
                 url = BYTE_ORIGIN + "/api/v1/job/posts/" + ident + "?portal_type=3&with_recommend=true"
                 try:
-                    response, digest = _json(http, url, deadline, 1024 * 1024)
+                    response, digest = _json(http, url, source_deadline, 1024 * 1024)
                     job = _byte_job(response, ident, digest, now)
                     summary["verified"] += 1
                     retain(job)
@@ -302,24 +496,66 @@ def discover(query="", recruitment_type="campus", cities=None, **optional):
                 except SourceError as exc:
                     reason = str(exc)
                     failures.append({"source": source, "stage": "official_detail", "external_id": ident, "reason": reason})
+                    summary["stop_reason"] = reason
                     summary["status"] = "partial" if summary["verified"] else "failed"
-                    if reason in ("http_401", "http_403", "http_429", "time_budget_exhausted", "invalid_json", "detail_schema_changed", "detail_identity_not_confirmed", "incomplete_detail", "detail_text_too_large", "recommendations_schema_changed", "board_schema_changed_or_too_large"):
+                    if reason in ("http_401", "http_403", "http_429", "network_timeout", "source_fetch_busy", "time_budget_exhausted", "invalid_json", "detail_schema_changed", "detail_identity_not_confirmed", "incomplete_detail", "detail_text_too_large", "recommendations_schema_changed", "board_schema_changed_or_too_large"):
                         break
-                if queue and requests < budget:
-                    pause(min(.35, max(0, deadline - time.monotonic())))
+                if queue and summary["requests"] < source_budget:
+                    pause(min(.35, max(0, source_deadline - time.monotonic())))
             summary["truncated"] = bool(queue)
+            if queue and "stop_reason" not in summary:
+                summary["stop_reason"] = "source_request_or_time_budget_exhausted"
+        elif source in official_sources.BEISEN_SOURCES:
+            entry = official_sources.BEISEN_SOURCES[source]
+            summary.update(company=entry["company"], scope=entry["scope"], method=official_sources.SOURCE_METHOD)
+            def fetch(url, body=None):
+                nonlocal requests
+                if summary["requests"] >= source_budget:
+                    raise SourceError("source_request_budget_exhausted")
+                if time.monotonic() >= source_deadline:
+                    raise SourceError("time_budget_exhausted")
+                if summary["requests"]:
+                    pause(min(.35, max(0, source_deadline - time.monotonic())))
+                if time.monotonic() >= source_deadline:
+                    raise SourceError("time_budget_exhausted")
+                summary["requests"] += 1
+                requests += 1
+                kwargs = {"max_bytes": 1024 * 1024, "timeout": min(SOURCE_REQUEST_TIMEOUTS.get(urlsplit(url).hostname, 7), source_deadline - time.monotonic()), "deadline": source_deadline}
+                raw = http.get(url, **kwargs) if body is None else http.post(url, body=body, **kwargs)
+                if not isinstance(raw, bytes) or len(raw) > 1024 * 1024:
+                    raise SourceError("response_too_large_or_invalid")
+                return raw
+            # Query is user-entered job vocabulary, not a profile field. Reject
+            # contact details/credentials before transmitting it to any source.
+            unsafe_query = re.search(r'https?://|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?<!\d)\d{11,}(?!\d)|[\x00-\x1f]', query) or CREDENTIAL.search(query) or _deidentify(query, {}) != query.strip()
+            if unsafe_query:
+                detail = {"observed_jobs": [], "failures": [{"source": source, "reason": "unsafe_search_keywords"}], "stop_reason": "unsafe_search_keywords"}
+            else:
+                detail = official_sources.discover_beisen(source, query, recruitment_type, fetch, now)
+            for job in detail.pop("observed_jobs"):
+                summary["verified"] += 1
+                retain(job)
+            source_failures = detail.pop("failures")
+            if isinstance(http, Transport):
+                for failure in source_failures:
+                    if failure.get("reason") in ("http_401", "http_403", "http_429"):
+                        _pause_source(entry["host"], int(failure["reason"].split("_")[1]))
+            failures.extend(source_failures)
+            summary.update(detail)
+            if source_failures:
+                summary["status"] = "partial" if summary["verified"] else "failed"
         else:
             if not boards:
                 failures.append({"source": source, "reason": "no_official_boards_configured"})
                 summary["status"] = "failed"
             for board in boards:
-                if requests >= budget or time.monotonic() >= deadline:
+                if summary["requests"] >= source_budget or time.monotonic() >= source_deadline:
                     summary["truncated"] = True
                     break
                 requests += 1
                 summary["requests"] += 1
                 try:
-                    response, digest = _json(http, "https://api.ashbyhq.com/posting-api/job-board/" + board, deadline, 3 * 1024 * 1024)
+                    response, digest = _json(http, "https://api.ashbyhq.com/posting-api/job-board/" + board, source_deadline, 3 * 1024 * 1024)
                     rows = response.get("jobs")
                     if not isinstance(rows, list) or len(rows) > 1500:
                         raise SourceError("board_schema_changed_or_too_large")
@@ -341,7 +577,7 @@ def discover(query="", recruitment_type="campus", cities=None, **optional):
                     reason = str(exc)
                     failures.append({"source": source, "board": board, "stage": "official_board", "reason": reason})
                     summary["status"] = "partial" if summary["verified"] else "failed"
-                    if reason in ("http_401", "http_403", "http_429", "time_budget_exhausted", "invalid_json", "detail_schema_changed", "detail_identity_not_confirmed", "incomplete_detail", "detail_text_too_large", "recommendations_schema_changed", "board_schema_changed_or_too_large"):
+                    if reason in ("http_401", "http_403", "http_429", "network_timeout", "source_fetch_busy", "time_budget_exhausted", "invalid_json", "detail_schema_changed", "detail_identity_not_confirmed", "incomplete_detail", "detail_text_too_large", "recommendations_schema_changed", "board_schema_changed_or_too_large"):
                         break
         if summary["verified"] and summary["status"] == "failed":
             summary["status"] = "partial"
@@ -480,6 +716,7 @@ def hard_requirements(profile, job, policy=None):
     def add(name, status, reason, evidence=()):
         checks.append({"name": name, "status": status, "reason": reason, "evidence": list(evidence)})
     verification = job.get("verification") or {}
+    source_evidence = _list_strings(verification.get("evidence"))
     verified = job.get("record_type") == "verified_job" and verification.get("status") == "verified"
     try:
         verified_at = datetime.fromisoformat(verification.get("verified_at", "").replace("Z", "+00:00"))
@@ -492,11 +729,16 @@ def hard_requirements(profile, job, policy=None):
         [job.get("canonical_url", ""), str((job.get("verification") or {}).get("verified_at", ""))])
     availability = job.get("availability")
     add("availability", "pass" if availability in ("open", "online") else "fail" if availability in ("closed", "expired") else "unknown",
-        "岗位开放状态：" + str(availability or "未提供"))
+        "岗位开放状态：" + str(availability or "未提供"),
+        (["job/availability: " + str(availability)] if availability else []) +
+        [e for e in source_evidence if e.startswith(("channel_online_status=", "availability="))])
     wanted_type = prefs.get("recruitment_type", "all")
     actual_type = job.get("recruitment_type", "unknown")
     add("recruitment_type", "pass" if wanted_type == "all" or wanted_type == actual_type else "unknown" if actual_type == "unknown" else "fail",
-        "目标招聘类型：" + str(wanted_type) + "；岗位类型：" + str(actual_type))
+        "目标招聘类型：" + str(wanted_type) + "；岗位类型：" + str(actual_type),
+        ["preferences/recruitment_type: " + str(wanted_type)] +
+        (["job/recruitment_type: " + str(actual_type)] if job.get("recruitment_type") else []) +
+        [e for e in source_evidence if e.startswith("招聘类型原文:")])
     minimum, degree_basis = _job_degree(requirements)
     levels = set().union(*(_degree_levels(_clean(e.get("degree"), 100)) for e in education)) if education else set()
     if minimum == 0:
@@ -524,7 +766,10 @@ def hard_requirements(profile, job, policy=None):
     cities = _list_strings(prefs.get("cities"))
     actual_cities = _list_strings(job.get("cities")) or [c.strip() for c in re.split(r"[/、,，]", _clean(job.get("city"), 500)) if c.strip()]
     city_status = "pass" if not cities or any(_city_key(w) == _city_key(a) for w in cities for a in actual_cities) else "unknown" if not actual_cities else "fail"
-    add("cities", city_status, "目标城市：" + (" / ".join(cities) or "不限") + "；岗位城市：" + (" / ".join(actual_cities) or "未确认"))
+    add("cities", city_status, "目标城市：" + (" / ".join(cities) or "不限") + "；岗位城市：" + (" / ".join(actual_cities) or "未确认"),
+        ["preferences/cities: " + (" / ".join(cities) or "不限")] +
+        (["job/" + ("cities" if _list_strings(job.get("cities")) else "city") + ": " + " / ".join(actual_cities)] if actual_cities else []) +
+        [e for e in source_evidence if e.startswith("城市原文:")])
     roles = _list_strings(prefs.get("roles"))
     excluded = _list_strings(prefs.get("excluded_roles"))
     role_families, target_families = _families(title), _families(" ".join(roles))
@@ -567,7 +812,7 @@ def _deidentify(text, profile):
     text = re.sub(r"[^\s,，;；:：<>@]+@[\w.-]+\.[\w-]{2,}", "[contact removed]", text)
     text = re.sub(r"(?:https?://|www\.)[^\s，。；;、<>]+", "[link removed]", text, flags=re.I)
     text = re.sub(r"(?:身份证(?:号(?:码)?)?|护照(?:号(?:码)?)?|证件号|社保号|微信号|QQ号|"
-                  r"passport(?: number)?|national id|social security(?: number)?|ssn)\s*[:：=]?\s*[A-Za-z\d][A-Za-z\d -]{3,}",
+                  r"passport(?: number)?|national id|social security(?: number)?|ssn)\s*[:：=]?\s*[A-Za-z\d_][A-Za-z\d_ -]{3,}",
                   "[identity removed]", text, flags=re.I)
     text = re.sub(r"(?:联系电话|电话号码|手机号|电话|手机|phone|mobile|telephone|tel)\s*[:：=]?\s*[+＋(（]?\d[\d \t().（）\-–－]{4,}\d",
                   "[contact removed]", text, flags=re.I)
@@ -699,6 +944,7 @@ def extract_profile(text):
                 "项目经历": "projects", "项目": "projects", "projects": "projects", "技能": "skills", "专业技能": "skills", "skills": "skills"}
     sections = {s: [] for s in ("education", "experience", "projects", "skills")}
     current = None
+    header_lines = 0
     for raw in text.splitlines():
         line = raw.strip().lstrip("# ").strip()
         if not line or INJECTION.search(line):
@@ -706,6 +952,11 @@ def extract_profile(text):
         label, sep, value = re.match(r"^([^：:]{1,30})([：:])(.*)$", line).groups() if re.match(r"^([^：:]{1,30})([：:])(.*)$", line) else (line, "", "")
         label = label.strip().casefold()
         value = value.strip()
+        # Only a narrow name-style introductory heading is recognized without a label.
+        # Keep fictional markers verbatim; never turn the example into a real identity.
+        if header_lines < 3 and current is None and not draft["name"] and re.fullmatch(r"[\u4e00-\u9fff]{2,4}[（(]虚构[^()（）]{0,30}[）)]", line):
+            draft["name"] = line
+        header_lines += 1
         if label in ("姓名", "name") and sep:
             draft["name"] = value[:200]
             current = None
@@ -714,6 +965,10 @@ def extract_profile(text):
             current = None
         elif label in ("目标城市", "意向城市", "cities", "target cities") and sep:
             draft["preferences"]["cities"] = [v.strip()[:100] for v in re.split(r"[,，、/;；]", value) if v.strip()][:20]
+            current = None
+        elif label in ("毕业年份", "毕业届别", "graduation year") and sep:
+            if re.fullmatch(r"20\d{2}(?:年|届)?", value):
+                draft["preferences"]["graduation_year"] = value[:4]
             current = None
         elif label in ("招聘类型", "recruitment type") and sep:
             draft["preferences"]["recruitment_type"] = "internship" if re.search(r"实习|intern", value, re.I) else "campus" if re.search(r"校招|campus", value, re.I) else "all"
@@ -731,16 +986,30 @@ def extract_profile(text):
         if graduation is None:
             graduation = re.search(r"(20\d{2}(?:[-/.年]\d{1,2}月?)?)\s*(?:毕业|届|graduat\w*)", line, re.I)
         major = re.search(r"(?:专业|major)\s*[:：]\s*([^,，;；|]+)", line, re.I)
+        # Common school / degree / major / date columns. A bare date becomes
+        # graduation only when an explicit graduation-year label corroborates it;
+        # enrollment dates and date ranges must remain unknown for human review.
+        columns = re.fullmatch(r"\s*[,，|｜]?\s*(本科|硕士|博士|专科)\s*[,，|｜\s]\s*([^,，|｜\s\d:：]{1,100})\s*[,，|｜\s]\s*(20\d{2}[-/.年]\d{1,2}月?)\s*", line[institution.end():]) if institution else None
+        if columns and re.search(r"入学|入校|入读|录取|报到|就读|在读|肄业|退学|enrol|start|admi|withdraw|dropout|incomplete", columns[2], re.I):
+            columns = None
+        column_major = columns[2].strip() if columns else ""
+        column_graduation = _graduation_value(columns[3]) if columns else ""
+        if column_graduation[:4] != draft["preferences"]["graduation_year"]:
+            column_graduation = ""
         draft["education"].append({"institution": institution[0].strip()[:200] if institution else "",
-                                   "degree": degree_match[0] if degree_match else "", "major": major[1].strip()[:200] if major else "",
-                                   "graduation": _graduation_value(graduation[1]) if graduation else ""})
+                                   "degree": degree_match[0] if degree_match else "", "major": major[1].strip()[:200] if major else column_major,
+                                   "graduation": _graduation_value(graduation[1]) if graduation else column_graduation})
     for section in ("experience", "projects"):
         if sections[section]:
             row = {"id": section + "-import-1", "description": "\n".join(sections[section])[:6000]}
             if section == "experience":
                 row.update({"organization": "", "role": ""})
             else:
-                row["name"] = ""
+                title = sections[section][0]
+                explicit_title = re.fullmatch(r"(?:项目名称|project name)\s*[:：]\s*(.{1,200})", title, re.I)
+                row["name"] = explicit_title[1] if explicit_title else (title if len(sections[section]) > 1 and len(title) <= 80 and not re.search(r"[。！？.!?:：]", title) else "")
+                # Also keep the title in the untouched description: labels and
+                # limitations must not disappear from evidence used downstream.
             draft[section].append(row)
     draft["skills"] = list(dict.fromkeys(v.strip()[:200] for line in sections["skills"] for v in re.split(r"[,，、;；|]", line) if v.strip()))[:50]
     return draft
