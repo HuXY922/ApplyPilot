@@ -235,6 +235,32 @@ class BackendTests(unittest.TestCase):
         events = self.request('/api/jobs/'+jid+'/events')[0]['events']
         self.assertEqual(events[-1]['to_status'],'preparing')
 
+    def test_same_stage_key_replay_does_not_undo_an_intervening_change(self):
+        jid = self.start()['jobs'][0]['id']
+        first = self.track(jid,'saved',idempotency_key='same-stage-key-a')
+        self.assertFalse(first['replayed'])
+        self.assertEqual(first['events'][-1]['idempotency_key'],'same-stage-key-a')
+        changed = self.track(jid,'preparing',idempotency_key='changed-stage-key-b')
+        replay = self.track(jid,'saved',idempotency_key='same-stage-key-a')
+        self.assertTrue(replay['replayed'])
+        self.assertEqual(replay['job']['tracker_status'],'preparing')
+        self.assertEqual(replay['job']['tracker_revision'],changed['job']['tracker_revision'])
+        self.assertEqual(replay['events'],changed['events'])
+
+    def test_same_stage_attestation_replay_cannot_clear_a_later_unknown_hold(self):
+        jid = self.start()['jobs'][0]['id']
+        self.track(jid,'submitted',attestation=True)
+        first = self.track(jid,'submitted',attestation=True,idempotency_key='same-attestation-a')
+        self.assertFalse(first['replayed'])
+        self.assertEqual(first['events'][-1]['idempotency_key'],'same-attestation-a')
+        unknown = self.track(jid,'submission_unknown',idempotency_key='later-unknown-key-b')
+        replay = self.track(jid,'submitted',attestation=True,idempotency_key='same-attestation-a')
+        self.assertTrue(replay['replayed'])
+        self.assertTrue(replay['job']['submission_unresolved'])
+        self.assertEqual(replay['job']['tracker_status'],'submission_unknown')
+        self.assertEqual(replay['job']['tracker_revision'],unknown['job']['tracker_revision'])
+        self.assertEqual(replay['events'],unknown['events'])
+
     def test_unknown_submission_does_not_become_safe_to_retry(self):
         jid = self.start()['jobs'][0]['id']
         self.track(jid,'submission_unknown')

@@ -127,7 +127,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_transport_denies_private_dns_and_redirects(self):
         with patch("applypilot_core.runtime.urllib.request.getproxies", return_value={}):
-            transport = runtime.Transport()
+            transport = runtime._DirectTransport()
         transport.opener = Mock()
         for url in ("http://jobs.bytedance.com/a", "https://127.0.0.1/a", "https://jobs.bytedance.com.evil.test/a", "https://jobs.bytedance.com:443/a", "https://user:pass@jobs.bytedance.com/a", "https://api.ashbyhq.com/posting-api/job-board/Ashby?x=1"):
             with self.assertRaises(runtime.SourceError):
@@ -141,7 +141,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_configured_process_proxy_resolves_only_allowlisted_destination(self):
         with patch("applypilot_core.runtime.urllib.request.getproxies", return_value={"https": "http://trusted-process-proxy:8080"}):
-            transport = runtime.Transport()
+            transport = runtime._DirectTransport()
         response = Mock()
         response.getcode.return_value = 200
         response.read.side_effect = [b"{}", b""]
@@ -179,6 +179,48 @@ class EligibilityTests(unittest.TestCase):
         facts = {f["id"]: f["text"] for f in result["evidence_catalog"]}
         for strength in result["strengths"]:
             self.assertEqual(strength["claim"], facts[strength["evidence_ids"][0]])
+
+    def test_structured_criteria_include_comparison_and_source_evidence(self):
+        self.profile["preferences"]["cities"] = ["上海", "北京"]
+        expected = {
+            "availability": ["job/availability: open", "channel_online_status=1"],
+            "recruitment_type": ["preferences/recruitment_type: campus", "job/recruitment_type: campus", "招聘类型原文: 正式 校招"],
+            "cities": ["preferences/cities: 上海 / 北京", "job/cities: 上海 / 深圳", "城市原文: 上海 / 深圳"],
+        }
+        for name, evidence in expected.items():
+            with self.subTest(name=name):
+                check = self.check(name)
+                self.assertEqual(check["status"], "pass")
+                for fact in evidence:
+                    self.assertIn(fact, check["evidence"])
+
+    def test_failed_structured_criteria_keep_the_actual_comparison_evidence(self):
+        self.job = fixture_job(online=0)
+        self.profile["preferences"].update(recruitment_type="internship", cities=["北京"])
+        expected = {"availability": "job/availability: closed",
+                    "recruitment_type": "preferences/recruitment_type: internship",
+                    "cities": "preferences/cities: 北京"}
+        for name, fact in expected.items():
+            with self.subTest(name=name):
+                check = self.check(name)
+                self.assertEqual(check["status"], "fail")
+                self.assertIn(fact, check["evidence"])
+
+    def test_missing_structured_facts_do_not_fabricate_job_evidence(self):
+        for field in ("availability", "recruitment_type", "city", "cities"):
+            self.job.pop(field, None)
+        self.job["verification"]["evidence"] = []
+        for name in ("availability", "recruitment_type", "cities"):
+            with self.subTest(name=name):
+                check = self.check(name)
+                self.assertEqual(check["status"], "unknown")
+                self.assertFalse(any(fact.startswith("job/") for fact in check["evidence"]))
+
+    def test_city_evidence_uses_the_same_fallback_as_the_comparison(self):
+        self.job.pop("cities")
+        self.job["city"] = "上海 / 北京"
+        self.job["verification"]["evidence"] = []
+        self.assertIn("job/city: 上海 / 北京", self.check("cities")["evidence"])
 
     def test_missing_degree_unknown(self):
         self.profile["education"][0]["degree"] = ""

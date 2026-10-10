@@ -25,6 +25,7 @@ class TestRuntime:
   if query=='empty':return {'jobs':[],'failures':[],'source_summary':[{'source':'fixture','status':'ok','requests':1,'verified':0,'returned':0,'scope':'Mocked fixture only'}]}
   job=deepcopy(demo_jobs()[0]);job.update(id='ignored',provider='fixture',external_id='safe-1',record_type='verified_job',canonical_url='https://careers.example.com/job/safe-1',availability='open',title='<img src=x onerror=alert(1)> AI 产品经理')
   job['verification']={'status':'verified','source':'mock fixture, not live network','verified_at':now(),'evidence':'Mock source evidence only'}
+  if query=='partial':return {'jobs':[job],'failures':[{'source':'fixture_failed','error':'simulated_partial_failure'}],'source_summary':[{'source':'fixture','status':'ok','requests':1,'verified':1,'returned':1,'scope':'Mocked fixture only'},{'source':'fixture_failed','status':'failed','requests':1,'verified':0,'returned':0,'scope':'Mocked fixture only'}]}
   return {'jobs':[job],'failures':[],'source_summary':[{'source':'fixture','status':'ok','requests':1,'verified':1,'returned':1,'scope':'Mocked fixture only'}]}
 body=json.dumps(req.get('body'),ensure_ascii=False).encode() if 'body' in req else b''
 app=ApplyPilotApp(os.environ.get('AP_UI_TEST_DATA','/tmp/applypilot-ui-simulation-data'),runtime=TestRuntime,searches_per_hour=1000,session_searches_per_hour=1000)

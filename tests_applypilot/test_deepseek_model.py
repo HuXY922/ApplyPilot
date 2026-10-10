@@ -95,6 +95,44 @@ class DeepSeekModelTests(_DeepSeekTestCase):
         result = self.call(opener_for(envelope(value)), task="resume_evidence", schema=model.RESUME_SCHEMA)
         self.assertEqual(len(model.validate_suggestions(result, {"experience/0/description": before})), 1)
 
+    def test_resume_prompt_clarifies_selection_and_isolates_nonempty_example(self):
+        facts = {"projects/0/description": "Compared prompts in a fictional classroom evaluation."}
+        payload = {"reviewed_evidence": [{"id": key, "text": value} for key, value in facts.items()],
+                   "untrusted_job": {"description": "Compare prompts and report evaluation failures."}}
+        opener = opener_for(envelope({"suggestions": []}))
+        result = self.call(opener, task="resume_evidence", schema=model.RESUME_SCHEMA, payload=payload)
+        body = json.loads(opener.open.call_args.args[0].data)
+        instructions = body["messages"][0]["content"]
+        for required in ("before and after may be identical", "reason select or prioritize",
+                         "Keep every paragraph", "limitations, negations and fictional-example labels",
+                         "no supplied description is applicable", "never invent a suggestion to fill a quota",
+                         "NONEMPTY FORMAT ILLUSTRATION", "MUST NOT be cited or copied"):
+            self.assertIn(required, instructions)
+        self.assertNotIn("Empty JSON result example:", instructions)
+        self.assertEqual(json.loads(body["messages"][1]["content"])["data"], payload)
+        self.assertNotIn(model.RESUME_EXAMPLE_EVIDENCE["id"], body["messages"][1]["content"])
+        example_facts = {model.RESUME_EXAMPLE_EVIDENCE["id"]: model.RESUME_EXAMPLE_EVIDENCE["text"]}
+        example = model.validate_suggestions(model.RESUME_EXAMPLE_RESULT, example_facts)
+        self.assertEqual(len(example), 1)
+        self.assertNotEqual(example[0]["before"], example[0]["after"])
+        with self.assertRaisesRegex(model.ModelError, "^ungrounded_output$"):
+            model.validate_suggestions(model.RESUME_EXAMPLE_RESULT, facts)
+        self.assertEqual(model.validate_suggestions(result, facts), [])
+
+    def test_resume_instruction_clarification_is_shared_with_openai(self):
+        value = {"status": "completed", "output": [{"type": "message", "role": "assistant",
+                 "content": [{"type": "output_text", "text": '{"suggestions":[]}'}]}]}
+        opener = opener_for(value)
+        with patch.dict(os.environ, {"APPLYPILOT_MODEL_PROVIDER": "openai",
+                                   "APPLYPILOT_OPENAI_API_KEY": "mock-openai-secret",
+                                   "APPLYPILOT_OPENAI_MODEL": "test-model"}):
+            self.call(opener, task="resume_evidence", schema=model.RESUME_SCHEMA)
+        body = json.loads(opener.open.call_args.args[0].data)
+        self.assertIn("before and after may be identical", body["instructions"])
+        self.assertIn("NONEMPTY FORMAT ILLUSTRATION", body["instructions"])
+        self.assertTrue(body["text"]["format"]["strict"])
+        self.assertEqual(body["text"]["format"]["schema"], model.RESUME_SCHEMA)
+
     def test_both_current_models_allowed_and_unknown_models_fail_closed(self):
         for name in ("deepseek-flash", "deepseek-v4-pro"):
             with self.subTest(name=name), patch.dict(os.environ, {"APPLYPILOT_DEEPSEEK_MODEL": name}):
@@ -300,6 +338,100 @@ class DeepSeekRuntimeTests(_DeepSeekTestCase):
         with patch("applypilot_core.model.urllib.request.build_opener", return_value=opener):
             result = runtime.analyze(profile, job)
         self.assertEqual(result["model_status"], "fallback_rules:network_failure")
+
+    def test_runtime_resume_valid_empty_is_model_result_not_rules_fallback(self):
+        profile, job = fixture_profile(), fixture_job()
+        with patch("applypilot_core.model.status", return_value={"configured": False}):
+            self.assertTrue(runtime.suggest_resume(profile, job)["suggestions"])
+        opener = opener_for(envelope({"suggestions": []}))
+        with patch("applypilot_core.model.urllib.request.build_opener", return_value=opener):
+            result = runtime.suggest_resume(profile, job)
+        self.assertEqual(result["suggestions"], [])
+        self.assertEqual(result["mode"], "model")
+        self.assertEqual(result["model_status"], "used_grounded_model_output")
+        self.assertEqual(result["model_provider"], "deepseek")
+        self.assertEqual(result["model_name"], "deepseek-flash")
+        self.assertEqual(opener.open.call_count, 1)
+
+    def test_runtime_resume_valid_unchanged_evidence_is_retained(self):
+        profile, job = fixture_profile(), fixture_job()
+        before = profile["experience"][0]["description"]
+        value = {"suggestions": [{"before": before, "after": before, "reason": "prioritize",
+                                  "evidence_ids": ["experience/0/description"]}]}
+        opener = opener_for(envelope(value))
+        with patch("applypilot_core.model.urllib.request.build_opener", return_value=opener):
+            result = runtime.suggest_resume(profile, job)
+        self.assertEqual(result["mode"], "model")
+        self.assertEqual(result["model_status"], "used_grounded_model_output")
+        self.assertEqual(len(result["suggestions"]), 1)
+        self.assertEqual(result["suggestions"][0]["before"], before)
+        self.assertEqual(result["suggestions"][0]["after"], before)
+        self.assertEqual(result["suggestions"][0]["evidence_ids"], ["experience/0/description"])
+        self.assertEqual(opener.open.call_count, 1)
+
+    def test_runtime_resume_richer_fixture_preserves_meaningful_reorder(self):
+        profile, job = fixture_profile(), fixture_job()
+        paragraphs = ["整理虚构教学小组的会议记录与任务清单。",
+                      "在虚构教学项目中，为大模型 Agent 设计问答、工具调用和异常输入的离线评测用例集。",
+                      "按回答准确性、证据引用完整性和拒答边界记录评测结果，使用 Python 汇总失败案例。",
+                      "对比不同提示词模板的表现，将失败案例归类并整理模型评测清单。",
+                      "根据模拟用户反馈调整 Agent 交互原型，记录问题、改动和复测结果。",
+                      "以上均为虚构教学案例，未接入真实客户或生产系统，未声称带来业务增长。"]
+        before = "\n".join(paragraphs)
+        after = "\n".join(paragraphs[i] for i in (1, 2, 3, 4, 0, 5))
+        profile["projects"] = [{"description": before}]
+        with patch("applypilot_core.model.status", return_value={"configured": False}):
+            rules = runtime.suggest_resume(profile, job)
+        self.assertTrue(any(item["before"] == before and item["before"] != item["after"]
+                            for item in rules["suggestions"]))
+        # This is a contract fixture, not evidence of actual model generation.
+        value = {"suggestions": [{"before": before, "after": after, "reason": "reorder",
+                                  "evidence_ids": ["projects/0/description"]}]}
+        opener = opener_for(envelope(value))
+        with patch("applypilot_core.model.urllib.request.build_opener", return_value=opener):
+            result = runtime.suggest_resume(profile, job)
+        self.assertEqual(result["mode"], "model")
+        self.assertEqual(result["model_provider"], "deepseek")
+        self.assertEqual(len(result["suggestions"]), 1)
+        self.assertEqual(result["suggestions"][0]["after"], after)
+        self.assertCountEqual(after.splitlines(), before.splitlines())
+        self.assertEqual(after.splitlines()[-1], paragraphs[-1])
+        request = json.loads(opener.open.call_args.args[0].data)
+        payload = json.loads(request["messages"][1]["content"])["data"]
+        self.assertIn({"id": "projects/0/description", "text": before}, payload["reviewed_evidence"])
+        self.assertEqual(opener.open.call_count, 1)
+
+    def test_runtime_copied_prompt_example_is_labeled_rules_fallback(self):
+        opener = opener_for(envelope(model.RESUME_EXAMPLE_RESULT))
+        with patch("applypilot_core.model.urllib.request.build_opener", return_value=opener):
+            result = runtime.suggest_resume(fixture_profile(), fixture_job())
+        self.assertEqual(result["mode"], "rules")
+        self.assertEqual(result["model_status"], "fallback_rules:ungrounded_output")
+        self.assertIsNone(result["model_provider"])
+        self.assertNotIn("example_only", json.dumps(result))
+        self.assertEqual(opener.open.call_count, 1)
+
+    def test_runtime_resume_invalid_citation_rejects_whole_result_and_labels_fallback(self):
+        profile, job = fixture_profile(), fixture_job()
+        profile["projects"] = [{"description": "Maintained a fictional project checklist."}]
+        before = profile["experience"][0]["description"]
+        valid = {"before": before, "after": before, "reason": "select",
+                 "evidence_ids": ["experience/0/description"]}
+        for ids in ([], ["invented"], ["projects/0/description"],
+                    ["experience/0/description", "experience/0/description"]):
+            for mixed in (False, True):
+                invalid = {**valid, "evidence_ids": ids}
+                value = {"suggestions": [valid, invalid] if mixed else [invalid]}
+                opener = opener_for(envelope(value))
+                with self.subTest(ids=ids, mixed=mixed), patch("applypilot_core.model.urllib.request.build_opener", return_value=opener):
+                    result = runtime.suggest_resume(profile, job)
+                self.assertEqual(result["mode"], "rules")
+                self.assertEqual(result["model_status"], "fallback_rules:ungrounded_output")
+                self.assertIsNone(result["model_provider"])
+                self.assertIsNone(result["model_name"])
+                self.assertTrue(result["suggestions"])
+                self.assertEqual(result["suggestions"][0]["before"], before)
+                self.assertEqual(opener.open.call_count, 1)
 
     def test_runtime_resume_invention_or_dropped_qualifier_degrades(self):
         profile, job = fixture_profile(), fixture_job()
