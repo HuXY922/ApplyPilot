@@ -3,8 +3,8 @@ const ROOT = document.querySelector('#app');
 const DIALOG = document.querySelector('#confirmation');
 const ROUTES = [
   ['overview', '总览', 'grid', '01'], ['profile', '个人档案', 'user', '02'],
-  ['radar', '岗位雷达', 'radar', '03'], ['analysis', '匹配分析', 'target', '04'],
-  ['resume', '简历工作台', 'file', '05'], ['tracker', '投递追踪', 'layers', '06'],
+  ['radar', '岗位雷达', 'radar', '03'], ['notices', '校招资讯', 'cap', '04'], ['analysis', '匹配分析', 'target', '05'],
+  ['resume', '简历工作台', 'file', '06'], ['tracker', '投递追踪', 'layers', '07'],
 ];
 const STATUS = {saved:'已收藏',skipped:'已跳过',preparing:'准备材料',filling:'填写中',waiting_user:'等待确认',submission_unknown:'提交结果未知',submitted:'已投递（手动记录）',assessment:'笔试 / 测评',interview:'面试中',offer:'已获 Offer',rejected:'已结束'};
 const MODEL_PROVIDERS = {openai:{label:'OpenAI',destination:'OpenAI API（api.openai.com）'},deepseek:{label:'DeepSeek',destination:'DeepSeek API（api.deepseek.com）'}};
@@ -39,6 +39,9 @@ let searchDraft = {query:'', recruitment_type:'campus', cities:''};
 let eventsCache = new Map(), eventsErrors = new Map(), lastSearchRun = null, searchErrorToast = null;
 const trackDrafts = new Map();
 const busy = new Set();
+let noticeData = null, noticeLoading = false, noticeError = '', noticeSource = '', noticeQuery = '';
+let selectedNoticeId = null;
+const noticeHistory = new Map(), noticeHistoryErrors = new Map();
 
 function validRoute(value) { return ROUTES.some(r => r[0] === value) ? value : 'overview'; }
 function el(tag, attrs = {}, ...children) {
@@ -124,9 +127,10 @@ function go(next) {
   next=validRoute(next); mobileOpen=false;
   if (route!==next) {route=next; location.hash=next; window.scrollTo({top:0});}
   render();
+  if(next==='notices' && !noticeData && !noticeLoading) loadNotices();
   if(next==='tracker' && selected()) loadEvents(selected());
 }
-window.addEventListener('hashchange',()=>{route=validRoute(location.hash.slice(1));mobileOpen=false;render();if(route==='tracker'&&selected())loadEvents(selected());});
+window.addEventListener('hashchange',()=>{route=validRoute(location.hash.slice(1));mobileOpen=false;render();if(route==='notices'&&!noticeData&&!noticeLoading)loadNotices();if(route==='tracker'&&selected())loadEvents(selected());});
 window.matchMedia?.('(max-width: 700px)').addEventListener('change',()=>{mobileOpen=false;render();});
 window.addEventListener('keydown',event=>{if(event.key==='Escape'&&mobileOpen){mobileOpen=false;render();}});
 window.addEventListener('beforeunload',event=>{if(profileDirty){event.preventDefault();event.returnValue='';}});
@@ -173,7 +177,7 @@ function render() {
   const sidebar=el('aside',{class:`sidebar ${mobileOpen?'open':''}`,inert:window.matchMedia?.('(max-width: 700px)').matches&&!mobileOpen?'':null},el('div',{class:'brand'},el('div',{class:'brand-mark','aria-hidden':'true'},'A'),'ApplyPilot'),el('div',{class:'brand-tag'},'YOUR NEXT CHAPTER'),el('div',{class:'nav-label'},'求职工作台'),nav,el('div',{class:'sidebar-bottom'},el('div',{class:'privacy-note'},el('strong',{},icon('shield',14),'每一步，由你掌舵'),el('p',{},'信息可追溯，建议有依据。外部投递始终由你确认并完成。')),el('div',{class:'session-status'},el('i',{class:'status-dot'}),'独立演示会话'),el('p',{class:'session-version'},'APPLYPILOT / CAMPUS EDITION'),state.session_expires_at?el('p',{class:'session-expiry'},`会话到期：${formatDate(state.session_expires_at*1000)}`):null));
   const topbar=el('header',{class:'topbar'},el('div',{class:'breadcrumbs'},el('button',{class:'mobile-menu',type:'button','aria-label':mobileOpen?'关闭菜单':'打开菜单','aria-expanded':mobileOpen,onClick:()=>{mobileOpen=!mobileOpen;render();}},icon('menu',20)),el('span',{},'工作空间'),el('span',{class:'crumb-separator'},'/'),el('strong',{},ROUTES.find(r=>r[0]===route)[1])),el('div',{class:'topbar-right'},el('span',{class:'header-label'},'CHINA CAMPUS'),el('span',{class:'mode-pill'},el('i',{class:'status-dot'}),modeLabel()),el('button',{class:'topbar-refresh',type:'button','aria-label':'刷新会话状态',disabled:busy.has('refresh'),onClick:()=>action('refresh',()=>refresh(),'状态已刷新。')},icon('refresh',15)),el('div',{class:'avatar',title:'虚构演示档案'},(state.profile?.name||'演示').slice(0,1))));
   const content=el('main',{id:'main',class:'content',tabindex:'-1'},el('div',{class:'demo-notice',role:'note'},el('span',{},icon('info',13),'虚构演示；匿名会话约24小时后过期，过期数据会清理，不用于真实长期求职记录。请仅使用虚构资料；系统不会向外部网站自动投递。'),el('b',{class:'demo-badge'},'PUBLIC DEMO')));
-  const pages={overview:renderOverview,profile:renderProfile,radar:renderRadar,analysis:renderAnalysis,resume:renderResume,tracker:renderTracker};
+  const pages={overview:renderOverview,profile:renderProfile,radar:renderRadar,notices:renderNotices,analysis:renderAnalysis,resume:renderResume,tracker:renderTracker};
   content.append(pages[route](),el('footer',{class:'footnote'},el('span',{},'ApplyPilot · 为下一程，做更充分的准备'),el('span',{},'可追溯的信息 / 有依据的建议 / 由你确认的行动')));
   ROOT.replaceChildren(el('div',{class:'app-shell'},sidebar,el('button',{class:`mobile-overlay ${mobileOpen?'open':''}`,type:'button','aria-label':'关闭导航',tabindex:'-1',onClick:()=>{mobileOpen=false;render();}}),el('div',{class:'main-shell'},topbar,content)));
 }
@@ -381,7 +385,65 @@ async function loadEvents(job,force=false){
   finally{busy.delete(key);if(route==='tracker')render();}
 }
 async function boot(){
-  try{await refresh();render();if(route==='tracker'&&selected())loadEvents(selected());}
+  try{await refresh();render();if(route==='notices')loadNotices();if(route==='tracker'&&selected())loadEvents(selected());}
   catch(error){ROOT.replaceChildren(el('div',{class:'boot error'},el('div',{class:'brand-mark'},'A'),el('strong',{},'工作台暂时未连接'),el('span',{},error.message),btn('重新连接',boot,{style:'primary',ico:'refresh'})));}
 }
 boot();
+
+// University notices have their own cache, route and history. They never enter jobs/tracker.
+const NOTICE_STATUS = {never_refreshed:'尚未刷新',ok:'已读取',partial:'部分读取',failed:'读取失败',paused:'已暂停',cooldown:'等待下次刷新'};
+const NOTICE_DETAIL = {list_only:'仅列表元数据，详情未解析',not_fetched:'详情尚未读取',html_parsed:'已读取 HTML 短摘要',html_parsed_attachments_unparsed:'HTML 已读取，附件未解析'};
+function noticeReason(value) {
+  return ({http_403:'来源拒绝访问，已暂停，需维护者复核',http_401:'来源要求登录，已暂停',http_429:'来源限流，等待 Retry-After',robots_disallowed:'站点 robots 限制，已暂停',robots_rate_requires_operator_review:'站点频率规则需维护者复核',network_timeout:'来源请求超时',network_failure:'来源网络不可用',time_budget_exhausted:'本轮时间预算已用尽',request_budget_exhausted:'本轮请求预算已用尽',list_schema_changed_or_empty:'列表结构变化或未识别到记录',detail_schema_changed:'详情结构未识别',minimum_refresh_interval:'共享刷新间隔未到',storage_capacity_reached:'存储已到维护阈值'})[value] || value || '未提供';
+}
+async function loadNotices(refreshSource=false) {
+  if(noticeLoading)return;
+  noticeLoading=true;noticeError='';if(route==='notices')render();
+  try {
+    noticeData=await api(refreshSource?'/api/notices/refresh':'/api/notices',refreshSource?{sources:noticeSource?[noticeSource]:['nankai','dlut_panjin']}:undefined);
+    if(refreshSource){noticeHistory.clear();selectedNoticeId=null;}
+  } catch(error) {noticeError=error.message;}
+  finally {noticeLoading=false;if(route==='notices')render();}
+}
+async function loadNoticeHistory(id) {
+  selectedNoticeId=selectedNoticeId===id?null:id;
+  if(!selectedNoticeId){render();return;}
+  if(noticeHistory.has(id)){render();return;}
+  noticeHistoryErrors.delete(id);render();
+  try{noticeHistory.set(id,await api(`/api/notices/${encodeURIComponent(id).replace('%3A',':')}/events`));}
+  catch(error){noticeHistoryErrors.set(id,error.message);}
+  if(route==='notices')render();
+}
+function renderNoticeHistory(item) {
+  const info=noticeHistory.get(item.id), error=noticeHistoryErrors.get(item.id);
+  return el('div',{class:'notice-history'},el('h4',{},'观察记录'),error?notice(error,'error'):info?el('ul',{},array(info.events).slice(0,12).map(event=>el('li',{},el('time',{},formatDate(event.observed_at)),` · ${{discovered:'首次发现',content_changed:'原文或元数据有变化',observed:'再次观察到'}[event.event_type]||event.event_type}`,event.event_type==='content_changed'?el('p',{class:'small-copy'},`变化字段：${Object.keys(event.changes||{}).map(k=>({title:'标题',university_published_on:'高校发布日期',deadline_quote:'截止原句',deadline_on:'截止日期',summary:'短摘要',detail_status:'详情读取状态',explicit_cohorts:'原文届别',last_detail_error:'详情错误'})[k]||k).join('、')||'正文内容哈希'}`):null))):el('p',{class:'small-copy'},'正在读取观察记录…'),info?el('p',{class:'small-copy'},'仅展示最近 12 条观察；不保存或转发整篇公告。'):null);
+}
+function renderNoticeCard(item) {
+  const source=array(noticeData?.sources).find(s=>s.id===item.source_id);
+  const url=safeURL(item.source_url);
+  return el('article',{class:'card notice-card'},el('div',{class:'notice-card-heading'},tag('高校资讯线索','blue'),el('span',{class:'small-copy'},source?.name||item.source_id)),el('h2',{},item.title),el('div',{class:'notice-date-line'},el('strong',{},`高校发布 / 转载：${item.university_published_on||'未知'}`),el('span',{},`首次发现：${formatDate(item.first_seen_at)}`)),
+    el('div',{class:'tags'},tag(item.explicit_cohorts?.length?`原文明示：${item.explicit_cohorts.join(' / ')} 届`:'届别未知'),tag('校园限制未知'),tag('招聘状态未知')),
+    el('p',{class:'small-copy gap-top'},`企业线索：${item.company_hint||'未知'}${item.company_hint?'（仅据标题，未核验主体）':''}`),
+    item.graduation_window_quote?el('p',{class:'small-copy'},`毕业时间原句：${item.graduation_window_quote}`):null,
+    item.batch_text?el('p',{class:'small-copy'},`招聘批次原文：${item.batch_text}`):null,
+    item.related_school_count>1?el('p',{class:'small-copy'},`另有高校出现相同企业线索，共 ${item.related_school_count} 个来源；各公告保留独立记录，批次未合并。`):null,
+    item.detail_university_published_on&&item.detail_university_published_on!==item.university_published_on?notice(`详情页另显示高校日期 ${item.detail_university_published_on}，与列表日期不同，请以原文核对。`):null,
+    item.summary?el('p',{class:'notice-excerpt'},item.summary):null,
+    el('div',{class:'notice-deadline'},el('strong',{},item.deadline_status==='explicit_date'?`截止日期原文明示：${item.deadline_on}`:'截止日期：未知'),item.deadline_quote?el('p',{},`原句：${item.deadline_quote}`):el('p',{},'当前已读内容未取得明确截止原句，请核对原文。'),el('p',{},'高校公告中的日期仍需到雇主原文核对，不代表岗位仍在招聘。')),
+    item.detail_text_truncated?notice('正文超出解析上限，仅读取前段；截止日期保持未知，请打开原文。'):null,
+    el('p',{class:'small-copy'},NOTICE_DETAIL[item.detail_status]||'详情状态未知'),
+    item.last_detail_error?el('p',{class:'small-copy'},`最近详情读取：${noticeReason(item.last_detail_error)}。保留此前读取结果。`):null,
+    el('p',{class:'small-copy'},`最近观察：${formatDate(item.last_seen_at)} · 详情观察：${item.last_detail_seen_at?formatDate(item.last_detail_seen_at):'未读取'}`),
+    el('div',{class:'button-row gap-top'},url?el('a',{class:'btn small',href:url,target:'_blank',rel:'noopener noreferrer'},'打开高校原文',icon('external',13)):null,btn(selectedNoticeId===item.id?'收起记录':'查看观察记录',()=>loadNoticeHistory(item.id),{style:'small'})),selectedNoticeId===item.id?renderNoticeHistory(item):null);
+}
+function renderNotices() {
+  const sources=array(noticeData?.sources), all=array(noticeData?.notices);
+  const filtered=all.filter(item=>(!noticeSource||item.source_id===noticeSource)&&(!noticeQuery||`${item.title} ${item.company_hint||''}`.toLowerCase().includes(noticeQuery.toLowerCase())));
+  const nextSources=sources.filter(s=>(!noticeSource||s.id===noticeSource)&&!s.paused&&(!s.next_refresh_epoch||s.next_refresh_epoch*1000<=Date.now()));
+  const controls=el('section',{class:'card search-card'},el('div',{class:'notice-controls'},el('label',{class:'field'},el('span',{},'高校来源'),el('select',{value:noticeSource,onChange:event=>{noticeSource=event.target.value;render();}},el('option',{value:'',selected:!noticeSource},'全部已接入高校'),sources.map(s=>el('option',{value:s.id,selected:noticeSource===s.id},s.name)))),el('label',{class:'field'},el('span',{},'筛选已保存标题 / 企业线索'),el('input',{type:'search',value:noticeQuery,placeholder:'例如：银行、2027、实习',onChange:event=>{noticeQuery=event.target.value;render();}})),btn(noticeLoading?'读取中…':'手动刷新高校来源',()=>loadNotices(true),{style:'primary',ico:'refresh',disabled:noticeLoading||(sources.length>0&&!nextSources.length),id:'notices-refresh'}),btn('读取已有记录',()=>loadNotices(false),{style:'small',disabled:noticeLoading})),el('p',{class:'search-help'},'每校仅读取最新列表 1 页（南开最多 20 条，大工盘锦最多 10 条），每校最多再读 3 篇 HTML 详情。来源读取预算 35 秒 / 10 个请求；同源共享 15 分钟冷却，无自动定时任务。筛选仅作用于已保存记录。'));
+  return el('div',{},header('先看到消息，再核对机会。','CAMPUS NOTICE RADAR','跨公司公开资讯，按高校发布 / 转载日期倒序。'),notice('高校栏目可能混有校招、实习和单岗位线索。公告不等于可投递岗位，也不证明你符合条件。学校日期不是雇主原发布日期；今天发现的旧公告不会标作今天发布。','info'),controls,
+    noticeError?notice(el('div',{},noticeError,el('p',{},'已保存记录保持不变；可稍后读取已有记录。')),'error'):null,
+    noticeLoading?notice('正在有界读取来源。你可以切换页面；结果不会写入岗位雷达或投递追踪。','info'):null,
+    sources.length?el('details',{class:'card source-results',open:true},el('summary',{},'来源范围与最近状态'),sources.map(source=>el('div',{class:'source-result-row'},el('strong',{},`${source.name} · ${source.paused?'已暂停':NOTICE_STATUS[source.status]||source.status}`),el('p',{},`最近尝试：${source.last_attempt_at?formatDate(source.last_attempt_at):'尚无'} · 最近列表成功：${source.last_success_at?formatDate(source.last_success_at):'尚无'}`),source.last_result?el('p',{},`读取 ${source.last_result.pages_read||0} / 1 页；观察 ${source.last_result.notices_seen||0} 条；解析详情 ${source.last_result.detail_pages_read||0} 篇。${source.last_result.university_date_range?`本页学校日期：${source.last_result.university_date_range.oldest} 至 ${source.last_result.university_date_range.newest}。`:''}后续页面未读取。`):null,source.reason?el('p',{},noticeReason(source.reason)):null,source.next_refresh_epoch&&!source.paused?el('p',{},`可再次请求时间：${formatDate(source.next_refresh_epoch*1000)}`):null,array(source.last_result?.failures).map(f=>el('p',{},`${f.notice_id}：${noticeReason(f.code)}`)),el('p',{},'公开可读不代表无限抓取许可；保留最小元数据、短摘要与原链接。'),el('a',{href:source.list_url,target:'_blank',rel:'noopener noreferrer'},'打开学校列表',icon('external',12))))):null,
+    el('div',{class:'radar-toolbar'},el('strong',{},`显示 ${filtered.length} 条 / 已保存 ${noticeData?.total||0} 条`),el('span',{},`最多展示最近 ${noticeData?.visible_limit||200} 条；所有记录均为资讯线索`)),filtered.length?el('div',{class:'notice-grid'},filtered.map(renderNoticeCard)):empty(noticeData?'当前筛选没有资讯':'尚未读取校招资讯',noticeData&&all.length?'清空筛选或选择其他来源。':'点击手动刷新读取公开高校资讯。失败或限流会显示具体状态，不会清空旧记录。',null,'cap'));
+}
