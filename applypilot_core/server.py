@@ -16,10 +16,13 @@ from wsgiref.simple_server import make_server, WSGIRequestHandler
 
 from db import ROOT
 from .service import Service
+from .university_notices import NoticeRadar
 from .store import DomainError, SessionManager, Store, connect, encode, require
 
 MAX_BODY = 3*1024*1024
 LOG = logging.getLogger('applypilot')
+PUBLIC_ASSETS = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/style.css':'style.css',
+                 '/demo-form':'demo-form.html','/demo-form.html':'demo-form.html','/demo-form.js':'demo-form.js','/demo-form.css':'demo-form.css'}
 
 
 def _unique_object(pairs):
@@ -58,6 +61,15 @@ class ApplyPilotApp:
         self.budgets = {'model':(max(0,int(model_calls_per_day)),max(0,int(session_model_calls_per_day))),
                         'search':(max(0,int(searches_per_hour)),max(0,int(session_searches_per_hour)))}
         self.web_root = Path(web_root or ROOT/'applypilot_web').resolve()
+        self._notice_radar = None
+
+    @property
+    def notice_radar(self):
+        # A new public-cache failure must not prevent the existing workspace
+        # from starting; initialize only when this independent feature is used.
+        if self._notice_radar is None:
+            self._notice_radar = NoticeRadar(self.sessions.root)
+        return self._notice_radar
 
     def _session(self, environ, create=False):
         cookie = SimpleCookie()
@@ -102,7 +114,15 @@ class ApplyPilotApp:
         origin = environ.get('HTTP_ORIGIN')
         if origin is not None or write:
             require(origin == self.origin, 'invalid_origin','Same-origin requests are required.',403)
-        require(environ.get('HTTP_SEC_FETCH_SITE','') not in ('cross-site',), 'cross_site','Cross-site requests are not permitted.',403)
+        # An external link may open only an exact, read-only public static route.
+        # Keep Host/Origin checks above, and never exempt API reads or writes,
+        # embedded documents, subresource fetches, unknown routes or other methods.
+        public_navigation = (not write and environ.get('REQUEST_METHOD','GET') == 'GET'
+                             and environ.get('PATH_INFO','/') in PUBLIC_ASSETS
+                             and environ.get('HTTP_SEC_FETCH_MODE') == 'navigate'
+                             and environ.get('HTTP_SEC_FETCH_DEST') == 'document')
+        require(environ.get('HTTP_SEC_FETCH_SITE','') != 'cross-site' or public_navigation,
+                'cross_site','Cross-site requests are not permitted.',403)
 
     def _dispatch(self, environ):
         method = environ.get('REQUEST_METHOD','GET').upper()
@@ -117,10 +137,8 @@ class ApplyPilotApp:
         self._guard(environ,method == 'POST')
         if method in ('GET','HEAD') and path in ('/healthz','/api/health'):
             return 200,self.sessions.health(),None,None
-        assets = {'/':'index.html','/index.html':'index.html','/app.js':'app.js','/style.css':'style.css',
-                  '/demo-form':'demo-form.html','/demo-form.html':'demo-form.html','/demo-form.js':'demo-form.js','/demo-form.css':'demo-form.css'}
-        if method in ('GET','HEAD') and path in assets:
-            target = self.web_root/assets[path]
+        if method in ('GET','HEAD') and path in PUBLIC_ASSETS:
+            target = self.web_root/PUBLIC_ASSETS[path]
             require(target.is_file(),'not_found','Page not found.',404)
             mime = 'text/html; charset=utf-8' if target.suffix == '.html' else 'application/javascript; charset=utf-8' if target.suffix == '.js' else 'text/css; charset=utf-8'
             return 200,target.read_bytes(),None,mime
@@ -135,11 +153,18 @@ class ApplyPilotApp:
             state = service.state()
             state.update(csrf=session['csrf'],session_expires_at=session['expires_at'])
             return 200,state,cookie,None
+        if method == 'GET' and path == '/api/notices':
+            return 200,self.notice_radar.state(),cookie,None
+        notice_match = re.fullmatch(r'/api/notices/([a-z_]+:[0-9]{1,20})/events',path)
+        if method == 'GET' and notice_match:
+            return 200,self.notice_radar.events(notice_match[1]),cookie,None
         if method == 'POST':
             csrf = environ.get('HTTP_X_CSRF_TOKEN','')
             require(isinstance(csrf,str) and len(csrf) <= 100 and csrf.isascii() and secrets.compare_digest(csrf,session['csrf']), 'csrf','Refresh the page before making changes.',403)
             self.sessions.limit_write(session['session_hash'])
             data = self._read_json(environ)
+            if path == '/api/notices/refresh':
+                return 200,self.notice_radar.refresh(data),cookie,None
             if path == '/api/profile/import':
                 return 200,service.import_profile(data),cookie,None
             if path == '/api/profile':
