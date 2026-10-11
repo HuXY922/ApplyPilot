@@ -139,3 +139,13 @@ curl --fail --show-error https://YOUR_PUBLIC_IP/healthz
 Review updates against the deployed commit/patch, test in a clean staging directory, preserve original code, atomically replace only intended files, and restart only the application. A rollback must restore code and verify HTTPS recovery, including after interruption. Do not delete data or stop unrelated services as an assumed rollback.
 
 No off-host backup is implied by this layout. Plan backup and account/retention design separately before using real long-term job-search records.
+
+## University notice module and navigation update — 2026-10-11
+
+The external-link fix permits only exact public static GET document navigation; do not disable Fetch Metadata, Origin, Host or CSRF checks globally. API reads/writes remain protected. The subsequent notice module uses the same application service, dependency environment and writable data directory; no new port, process supervisor or scheduled task is required.
+
+The first use of the notice API creates `university-notices.sqlite3` under `APPLYPILOT_DATA_DIR`. It is a shared public cache, separate from private per-session workspaces. Existing private database schemas are not migrated. Code rollback should leave this new public database in place; never delete data as an assumed rollback. Back up and obtain appropriate approval before a future irreversible archive/cleanup.
+
+The public cache has finite row and 32 MiB storage limits. It stops with a maintenance notice rather than deleting history automatically. Anonymous workspace expiry does not turn this shared public cache into personal account storage. Preserve durable source pauses, robots observations and cooldowns; never clear them or restart to bypass a source restriction.
+
+The deployed module passed 139 legacy and 250 ApplyPilot server tests, with all 20 candidate hashes matching. A single formal browser refresh stored 20 Nankai notices with partial detail success; DUT Panjin timed out. Reload, local filter, history and original job/tracker preservation passed. Three rendered original-link URLs and new-window security attributes were checked; destination-click E2E was not performed. Only the app restarted. The HTTP navigation checks confirmed cross-site document GET succeeds while cross-site API reads/writes remain rejected; a real external-page click was not completed by the test tools. See [notice operations](UNIVERSITY_NOTICE_RADAR.md) and [verification](TEST_REPORT.md) for precise coverage and limits. No additional model call or actual application was made.

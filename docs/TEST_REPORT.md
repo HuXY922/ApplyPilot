@@ -1,4 +1,33 @@
-# Verification report — updated 2026-10-10 UTC
+# Verification report — updated 2026-10-11 UTC
+
+## Current deployed university-notice acceptance — 2026-10-11 UTC
+
+The notice module was deployed at **04:54:39 UTC**. All **20 changed file hashes** matched the reviewed candidate. Server tests passed **139 legacy tests in 5.656 seconds + 250 ApplyPilot tests in 11.367 seconds**, with no skips. The application alone restarted; the HTTPS proxy and original OpenClaw process stayed running. No existing profile/job/tracker schema was migrated, and no credential, service, port, dependency or scheduled task was added.
+
+The same final candidate separately passed an independent clean-replay run of **139 + 250 Python tests**, **152 existing DOM checks / 95 WSGI requests**, and **75 notice DOM checks / 18 WSGI requests**. These DOM suites use fixture sources and are not browser or live-source evidence.
+
+A real hosted-browser manual refresh at **04:56 UTC** started with an empty public cache and both sources never refreshed. Read-only public-cache verification found exactly one persisted run, **04:56:21Z–04:56:48Z**, **27 seconds at stored one-second precision**, **seven source requests**, **20 notices / 20 distinct URLs** and **20 first-discovery events**:
+
+- **Nankai:** one list page, **20 notices**, school publication dates **2026-10-10 through 2026-10-11**; one HTML detail succeeded, two detail requests timed out. The result is partial, not complete detail coverage.
+- **DUT Panjin:** the list request timed out; zero notices were returned in this run. Earlier development-environment success does not override this hosted failure.
+- The UI retained source errors, scope and unknown deadline/campus-access/recruiting-status fields. Notices did not enter the verified-job or application pipeline, and no examples substituted for failed reads.
+- A genuine browser reload retained all 20 notices and the original observation/cooldown timestamps. Filtering for a saved company name returned 1/20, clearing restored 20/20, and expanding history showed its first-discovery event. Three rendered original links were verified as exact HTTPS Nankai detail paths with `noopener noreferrer`.
+- The refresh button was disabled during the shared 15-minute cooldown; it was not force-clicked. Repeated-refresh no-op and zero-network behavior are covered by offline tests rather than an invented second live request.
+- The existing fictional profile version 12, seven jobs and manually recorded unknown-submission tracker state survived the app restart and notice workflow. No job-source query, model call, profile edit or real application was performed in this acceptance.
+
+This proves the deployed desktop-browser notice workflow with **partial source availability**, not all-school coverage, mobile/cross-browser behavior or future availability. Exactly one formal hosted source refresh was made. The stated 27-second duration comes from persisted run timestamps, not screenshot polling; subsecond end-to-end timing was not measured.
+
+## External-link navigation regression — 2026-10-11 UTC
+
+An external chat link sets `Sec-Fetch-Site: cross-site`; the previous global guard rejected the initial page before static routing. The fix permits only `GET` + `Sec-Fetch-Mode: navigate` + `Sec-Fetch-Dest: document` for the existing eight exact public static routes. The same allowlist also serves those files. Host and any supplied exact Origin (including scheme) are still checked first. API/health reads, writes, CSRF, unsupported methods, unknown routes, cross-site script/style fetches and embedded documents do not gain an exception. The static response does not create a session. HTTPS-only public configuration and response security headers are unchanged.
+
+**The following bullet list records pre-deployment local checks. Hosted navigation-header and ordinary-browser acceptance are recorded below; a real click from an external site remains unverified.** No external source, model provider or recruitment application was used.
+
+- The new regression suite first reproduced the bug against the unchanged server: 11 test methods, with 17 failing subcases. After the patch, all **11 new test methods passed**, covering genuine WSGI and loopback HTTP. These include external-link document/static navigation, normal same-origin assets and API bootstrap, malicious API reads/writes, valid-cookie attacks, missing/incorrect CSRF, Host/Origin/scheme mismatches, iframe/subresource rejection and exact route/method limits.
+- Full suites passed: **139 legacy tests in 2.558 seconds + 225 ApplyPilot tests in 5.940 seconds**, zero skips. The latter includes the 11 navigation regressions and all 214 existing tests.
+- **152 DOM checks / 95 WSGI requests passed.** This remains a simulated DOM with mocked discovery/model responses, not real browser rendering or browser E2E.
+- Genuine loopback HTTP/SQLite smoke passed fictional seed isolation, reviewed profile save, rules analysis/resume, tracker idempotency, second-session isolation and application-recreation persistence.
+- Both JavaScript syntax checks, all Python source compilation and the pinned environment's `pip check` passed.
 
 ## Official-source expansion — 2026-10-10 UTC
 
@@ -123,3 +152,17 @@ Additional deployment safeguards require Railway's /data mount before creating a
 ### Deployment account checkpoint
 
 On 2026-10-09 an authorized minimal Railway project-creation attempt returned: “Your trial has expired. Please select a plan to continue using Railway.” Re-listing projects confirmed no ApplyPilot project was created. No paid upgrade or resource change occurred. At that earlier checkpoint, the GitHub plugin was installed/enabled but exposed no GitHub operations, so authenticated access and publication were still unverified. The later browser publication and independent public-clone verification are recorded above; Railway remained blocked at that checkpoint. Subsequent Tencent, real-model and main-workspace browser results are recorded above; they do not assert successful Railway deployment or controlled-form browser E2E.
+
+### 2026-10-11 导航热修线上补充（与高校模块验收分开）
+
+部署执行方记录：04:33 UTC导航热修上线，3个变更文件hash匹配；服务器139旧测试（5.885秒）+225 ApplyPilot测试（9.947秒）全过。真实可信HTTPS的7项检查通过：原cross-site/navigate/document首页200，同源JS/CSS/bootstrap200，cross-site API GET/POST403，wrong-Origin POST403。普通云浏览器HTTPS首页完整渲染，既有v12/7岗位/人工未知投递状态保留。仅重启App，proxy/OpenClaw未变；未读招聘源、调用模型或写入资料。
+
+真实外链点击E2E未完成：该浏览器无法访问测试localhost，data协议受工具URL策略限制。不得将上述请求头HTTP验收称作“实际外链点击E2E已通过”。此线上记录只属于导航热修，不代表后来新增的高校资讯模块已部署。
+
+### 2026-10-11 高校资讯上线前候选记录
+
+新增独立模块的25项Python回归覆盖真实最小HTML fixture、日期倒序、年缺失/歧义截止、非截止统计日期、相同URL去重、跨校企业不合并、内容变化事件、既有数据库逐字节不变、恶意HTML/URL、长文本CPU界限、超时子进程回收、robots与403/429、冷却不耗历史、锁清理失败、失败保留缓存及同源/CSRF防护。另有75项DOM/API模拟检查（18次UI/WSGI请求），涵盖新路由、手动刷新、在途导航、冷却、筛选、历史、错误恢复、XSS字面量与旧jobs/tracker隔离；原152项DOM检查保持通过。
+
+独立安全审查发现的截止统计误识别、联系人尾部残留、重复空刷新耗尽历史、异常清理锁释放、畸形href、重复锚点/无@长文本CPU放大与历史面板无限加载均已修复并回归。真实源只进行一次有界烟测：大工10条列表/1篇详情成功，部分详情超时或预算耗尽，南开robots超时。当时开发环境Chromium因socket限制未能启动；该阶段不能证明浏览器或线上验收。后续独立生产浏览器结果见本报告首节。完整边界见 [高校资讯说明](UNIVERSITY_NOTICE_RADAR.md)。
+
+候选冻结全量回归（固定依赖venv）：139旧测试（2.350秒）+250 ApplyPilot测试（6.068秒）全过，无跳过；原152 DOM/95 WSGI与新75 DOM/18 WSGI全过，JS语法通过。最终代码的真实loopback HTTP/SQLite只读烟测通过 `/api/state`、`/api/notices`、`/api/notices/dlut_panjin:48082/events`：10条此前真实源缓存可见，旧虚构岗位仍3条，观察记录可读；未再次刷新外部来源或调用模型。
