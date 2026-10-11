@@ -1,0 +1,82 @@
+{
+  "observed_on_utc": "2026-10-11",
+  "method": "Standard-library HTTPS GET, TLS validation, honest research UA, no cookies/login/API/browser; bounded requests",
+  "sources": {
+    "nankai": {
+      "list_url": "https://career.nankai.edu.cn/correcruit/index.html",
+      "list_http_status": 200,
+      "list_items": 20,
+      "robots_http_status": 404,
+      "list_fetched_at_utc": "2026-10-11T04:25:09.666283+00:00",
+      "detail_url": "https://career.nankai.edu.cn/correcruit/content/id/119582.html",
+      "detail_http_status": 200,
+      "list_detail_path_pattern": "^/correcruit/content/id/[0-9]+\\.html$",
+      "next_page_observed": "https://career.nankai.edu.cn/correcruit/index/p/2.html",
+      "explicit_terms_anchors_on_inspected_pages": [],
+      "records": [
+        {
+          "id": "102975",
+          "title": "化工工艺、设备人才储备岗",
+          "published_date": "2026-10-11",
+          "kind_evidence": "single-role title; not a campus-announcement claim"
+        },
+        {
+          "id": "119691",
+          "title": "广州四三九九信息科技有限公司2027届秋招火热招聘中",
+          "published_date": "2026-10-10",
+          "publisher_label": "南开大学学生就业指导中心代发"
+        }
+      ],
+      "detail_record": {
+        "id": "119582",
+        "title": "虎牙2027届秋季校园招聘",
+        "published_date": "2026-10-09",
+        "publisher_label": "广州虎牙科技有限公司",
+        "cohort_evidence": "毕业时间在2026年9月至2027年8月期间的应届毕业生",
+        "deadline_text": "简历投递 即日起-10月31日",
+        "deadline_year_explicit": false,
+        "employer_url_reference": "https://hr.huya.com/home",
+        "employer_url_verified": false
+      }
+    },
+    "dlut_panjin": {
+      "list_url": "https://pjcareer.dlut.edu.cn/xsfw/qyzp.htm",
+      "list_http_status": 200,
+      "list_items": 10,
+      "robots_http_status": 404,
+      "list_fetched_at_utc": "2026-10-11T04:24:45.315072+00:00",
+      "detail_url": "https://pjcareer.dlut.edu.cn/info/1051/48012.htm",
+      "detail_http_status": 200,
+      "list_detail_path_pattern": "^/info/[0-9]+/[0-9]+\\.htm$",
+      "next_page_observed": "https://pjcareer.dlut.edu.cn/xsfw/qyzp/137.htm",
+      "explicit_terms_anchors_on_inspected_pages": [],
+      "footer_notice": "版权所有：大连理工大学盘锦校区",
+      "records": [
+        {
+          "id": "48042",
+          "title": "云南省能源集团有限公司2027年“源动力”管培生及所属公司校园招聘公告",
+          "published_date": "2026-10-10"
+        },
+        {
+          "id": "48012",
+          "title": "重庆银行2027届校园招聘公告",
+          "published_date": "2026-10-10"
+        }
+      ],
+      "detail_record": {
+        "id": "48012",
+        "cohort_evidence": "（一）2027届高校毕业生",
+        "deadline_text": "（三）截止时间：2026年11月1日18:00。",
+        "deadline_year_explicit": true,
+        "employer_url_reference": null,
+        "published_date_origin": "matched list row, not related-article dates"
+      }
+    }
+  },
+  "rights_note": "Public read access and robots 404 do not establish bulk collection/republication permission. Only inspected pages checked for explicit terms anchors; no domain-wide legal assurance.",
+  "disabled_sources": [
+    "scc.hnu.edu.cn",
+    "career.csu.edu.cn"
+  ],
+  "fixture_scope": "Small real HTML fragments; reconstructed wrappers explicitly marked. No full employer response, personal contacts, images, or scripts."
+}

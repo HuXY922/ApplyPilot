@@ -1,0 +1,196 @@
+{
+  "classification": "live public-source bounded smoke, not browser or production acceptance",
+  "run": {
+    "started_at": "2026-10-11T04:34:49Z",
+    "status": "partial",
+    "sources": [
+      {
+        "source_id": "nankai",
+        "pages_read": 0,
+        "detail_pages_read": 0,
+        "notices_seen": 0,
+        "scope": "latest_list_page_only",
+        "max_list_pages": 1,
+        "max_detail_pages": 3,
+        "list_url": "https://career.nankai.edu.cn/correcruit/index.html",
+        "failures": [],
+        "status": "failed",
+        "reason": "network_timeout"
+      },
+      {
+        "source_id": "dlut_panjin",
+        "pages_read": 1,
+        "detail_pages_read": 1,
+        "notices_seen": 10,
+        "scope": "latest_list_page_only",
+        "max_list_pages": 1,
+        "max_detail_pages": 3,
+        "list_url": "https://pjcareer.dlut.edu.cn/xsfw/qyzp.htm",
+        "failures": [
+          {
+            "notice_id": "dlut_panjin:48072",
+            "code": "network_timeout"
+          },
+          {
+            "notice_id": "dlut_panjin:48062",
+            "code": "time_budget_exhausted"
+          }
+        ],
+        "list_candidates": 10,
+        "list_limit": 10,
+        "more_pages_not_read": true,
+        "university_date_range": {
+          "newest": "2026-10-10",
+          "oldest": "2026-10-10"
+        },
+        "detail_support": "html",
+        "status": "partial"
+      }
+    ],
+    "requests": 5,
+    "finished_at": "2026-10-11T04:35:14Z"
+  },
+  "total": 10,
+  "source_states": [
+    {
+      "id": "nankai",
+      "name": "南开大学就业指导中心",
+      "list_url": "https://career.nankai.edu.cn/correcruit/index.html",
+      "page_size": 20,
+      "policy_reviewed_at": "2026-10-11",
+      "last_attempt_at": "2026-10-11T04:34:49Z",
+      "last_result": {
+        "detail_pages_read": 0,
+        "failures": [],
+        "list_url": "https://career.nankai.edu.cn/correcruit/index.html",
+        "max_detail_pages": 3,
+        "max_list_pages": 1,
+        "notices_seen": 0,
+        "pages_read": 0,
+        "reason": "network_timeout",
+        "scope": "latest_list_page_only",
+        "source_id": "nankai",
+        "status": "failed"
+      },
+      "next_refresh_epoch": 1791694189.761692,
+      "reason": "network_timeout",
+      "status": "failed"
+    },
+    {
+      "id": "dlut_panjin",
+      "name": "大连理工大学盘锦校区就业网",
+      "list_url": "https://pjcareer.dlut.edu.cn/xsfw/qyzp.htm",
+      "page_size": 10,
+      "policy_reviewed_at": "2026-10-11",
+      "last_attempt_at": "2026-10-11T04:34:49Z",
+      "last_result": {
+        "detail_pages_read": 1,
+        "detail_support": "html",
+        "failures": [
+          {
+            "code": "network_timeout",
+            "notice_id": "dlut_panjin:48072"
+          },
+          {
+            "code": "time_budget_exhausted",
+            "notice_id": "dlut_panjin:48062"
+          }
+        ],
+        "list_candidates": 10,
+        "list_limit": 10,
+        "list_url": "https://pjcareer.dlut.edu.cn/xsfw/qyzp.htm",
+        "max_detail_pages": 3,
+        "max_list_pages": 1,
+        "more_pages_not_read": true,
+        "notices_seen": 10,
+        "pages_read": 1,
+        "scope": "latest_list_page_only",
+        "source_id": "dlut_panjin",
+        "status": "partial",
+        "university_date_range": {
+          "newest": "2026-10-10",
+          "oldest": "2026-10-10"
+        }
+      },
+      "last_success_at": "2026-10-11T04:35:14Z",
+      "next_refresh_epoch": 1791694196.7694125,
+      "robots_checked_epoch": 1791693300.4305506,
+      "robots_status": "http_404_no_rules_found",
+      "status": "partial"
+    }
+  ],
+  "sample_metadata": [
+    {
+      "id": "dlut_panjin:48082",
+      "title": "新奥集团股份有限公司2027年校园招聘",
+      "source_url": "https://pjcareer.dlut.edu.cn/info/1051/48082.htm",
+      "university_published_on": "2026-10-10",
+      "first_seen_at": "2026-10-11T04:35:14Z",
+      "last_seen_at": "2026-10-11T04:35:14Z",
+      "detail_status": "html_parsed",
+      "deadline_status": "unknown",
+      "deadline_on": null,
+      "explicit_cohorts": []
+    },
+    {
+      "id": "dlut_panjin:48072",
+      "title": "中国石化化工销售有限公司华南分公司2027年校园招聘",
+      "source_url": "https://pjcareer.dlut.edu.cn/info/1051/48072.htm",
+      "university_published_on": "2026-10-10",
+      "first_seen_at": "2026-10-11T04:35:14Z",
+      "last_seen_at": "2026-10-11T04:35:14Z",
+      "detail_status": "not_fetched",
+      "deadline_status": "unknown",
+      "deadline_on": null,
+      "explicit_cohorts": []
+    },
+    {
+      "id": "dlut_panjin:48062",
+      "title": "高等教育出版社有限公司公开招聘2027年应届高校毕业生公告",
+      "source_url": "https://pjcareer.dlut.edu.cn/info/1051/48062.htm",
+      "university_published_on": "2026-10-10",
+      "first_seen_at": "2026-10-11T04:35:14Z",
+      "last_seen_at": "2026-10-11T04:35:14Z",
+      "detail_status": "not_fetched",
+      "deadline_status": "unknown",
+      "deadline_on": null,
+      "explicit_cohorts": []
+    },
+    {
+      "id": "dlut_panjin:48052",
+      "title": "国联民生证券2026年秋季校园招聘简章",
+      "source_url": "https://pjcareer.dlut.edu.cn/info/1051/48052.htm",
+      "university_published_on": "2026-10-10",
+      "first_seen_at": "2026-10-11T04:35:14Z",
+      "last_seen_at": "2026-10-11T04:35:14Z",
+      "detail_status": "not_fetched",
+      "deadline_status": "unknown",
+      "deadline_on": null,
+      "explicit_cohorts": []
+    },
+    {
+      "id": "dlut_panjin:48042",
+      "title": "云南省能源集团有限公司2027年“源动力”管培生及所属公司校园招聘公告",
+      "source_url": "https://pjcareer.dlut.edu.cn/info/1051/48042.htm",
+      "university_published_on": "2026-10-10",
+      "first_seen_at": "2026-10-11T04:35:14Z",
+      "last_seen_at": "2026-10-11T04:35:14Z",
+      "detail_status": "not_fetched",
+      "deadline_status": "unknown",
+      "deadline_on": null,
+      "explicit_cohorts": []
+    },
+    {
+      "id": "dlut_panjin:48032",
+      "title": "中国石化润滑油合成油脂分公司2027年毕业生校园招聘简章",
+      "source_url": "https://pjcareer.dlut.edu.cn/info/1051/48032.htm",
+      "university_published_on": "2026-10-10",
+      "first_seen_at": "2026-10-11T04:35:14Z",
+      "last_seen_at": "2026-10-11T04:35:14Z",
+      "detail_status": "not_fetched",
+      "deadline_status": "unknown",
+      "deadline_on": null,
+      "explicit_cohorts": []
+    }
+  ]
+}
